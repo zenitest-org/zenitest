@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve, ServerType } from "@hono/node-server";
 import { WebSocketServer, WebSocket } from "ws";
-import { Executor } from "./executor";
+import { registerRoutes } from "./routes";
 
 export class ZeniServer {
   private app: Hono;
@@ -20,37 +20,14 @@ export class ZeniServer {
     this.app.use("*", cors());
 
     // Health check routes
-    this.app.get("/", (c) => c.json({ status: "ok", service: "Zeni WebSocket Server" }));
-    this.app.get("/health", (c) => c.json({ status: "ok", service: "Zeni WebSocket Server" }));
+    this.app.get("/", (c) => c.json({ status: "ok", service: "Zeni API Server" }));
+    this.app.get("/health", (c) => c.json({ status: "ok", service: "Zeni API Server" }));
 
-    // Test execution API route
-    this.app.post("/api/run-test", async (c) => {
-      try {
-        const body = await c.req.json().catch(() => ({}));
-        const { testCase, clientId } = body;
-
-        if (!testCase || !clientId) {
-          return c.json({ success: false, error: "Missing testCase or clientId" }, 400);
-        }
-
-        if (!this.clients.has(clientId)) {
-          return c.json(
-            { success: false, error: `No active proxy client connected for clientId: ${clientId}` },
-            400
-          );
-        }
-
-        console.log(`[Server] Running test case "${testCase.title}" for client ${clientId}`);
-
-        // Connect Executor to this client session via local bridge
-        const executor = new Executor(`ws://localhost:${this.port}/browser/${clientId}`);
-        const report = await executor.run(testCase);
-
-        return c.json(report);
-      } catch (err: any) {
-        console.error("[Server] Error executing test run:", err);
-        return c.json({ success: false, error: err.message || String(err) }, 500);
-      }
+    // Register modular routes (Executions CRUD & Test Runner)
+    registerRoutes({
+      app: this.app,
+      clients: this.clients,
+      port: this.port,
     });
 
     this.wss = new WebSocketServer({ noServer: true });
@@ -204,6 +181,5 @@ export class ZeniServer {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = Number(process.env.PORT) || 3000;
   const server = new ZeniServer(port);
-  await server.start();
+  server.start().catch((err) => console.error(err));
 }
-
