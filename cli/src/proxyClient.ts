@@ -10,10 +10,12 @@ interface ClientOptions {
   clientId: string;
   chromePort: number;
   headless: boolean;
+  secrets?: Record<string, string>;
 }
 
 export class ZeniProxyClient {
   private options: ClientOptions;
+  private secrets: Record<string, string> = {};
   private chromeProcess: ChildProcess | null = null;
   private localWs: WebSocket | null = null;
   private serverWs: WebSocket | null = null;
@@ -25,7 +27,9 @@ export class ZeniProxyClient {
       clientId: options.clientId || "test-client-" + Math.random().toString(36).substring(7),
       chromePort: options.chromePort || 9222,
       headless: options.headless ?? true,
+      secrets: options.secrets || {},
     };
+    this.secrets = this.options.secrets || {};
   }
 
   private async getChromeExecutablePath(): Promise<string> {
@@ -47,7 +51,6 @@ export class ZeniProxyClient {
       return localPath;
     }
 
-    console.log(`[CLI Client] Local chrome-headless-shell not found. Downloading...`);
     const downloadedPath = await downloadChromeHeadlessShell();
     return downloadedPath;
   }
@@ -62,15 +65,9 @@ export class ZeniProxyClient {
   }
 
   public async start() {
-    console.log(`[CLI Client] Initializing Client Session for ID: ${this.options.clientId}`);
-
     const alreadyRunning = await this.isChromeRunning();
-    if (alreadyRunning) {
-      console.log(`[CLI Client] Chrome remote debugging is already running on port ${this.options.chromePort}.`);
-    } else {
-      console.log(`[CLI Client] Launching Chrome on remote debugging port ${this.options.chromePort}...`);
+    if (!alreadyRunning) {
       const execPath = await this.getChromeExecutablePath();
-      console.log(`[CLI Client] Launching binary: ${execPath}`);
 
       const args = [
         `--remote-debugging-port=${this.options.chromePort}`,
@@ -101,7 +98,6 @@ export class ZeniProxyClient {
       if (!ready) {
         throw new Error(`Failed to initialize Chrome on remote debugging port ${this.options.chromePort}`);
       }
-      console.log(`[CLI Client] Chrome successfully started.`);
     }
 
     // Retrieve CDP websocket endpoint
@@ -113,11 +109,9 @@ export class ZeniProxyClient {
     }
 
     return new Promise<void>((resolve, reject) => {
-      console.log(`[CLI Client] Connecting to local Chrome CDP: ${chromeDebuggerUrl}`);
       this.localWs = new WebSocket(chromeDebuggerUrl);
 
       const clientConnectUrl = `${this.options.serverUrl}/client/${this.options.clientId}`;
-      console.log(`[CLI Client] Connecting to WebSocket Server: ${clientConnectUrl}`);
       this.serverWs = new WebSocket(clientConnectUrl);
 
       let resolved = false;
@@ -132,8 +126,6 @@ export class ZeniProxyClient {
 
       const setupPiping = () => {
         if (this.localWs?.readyState === WebSocket.OPEN && this.serverWs?.readyState === WebSocket.OPEN) {
-          console.log(`[CLI Client] CDP Tunnel established successfully!`);
-
           this.localWs.on("message", (data, isBinary) => {
             if (this.serverWs?.readyState === WebSocket.OPEN) {
               this.serverWs.send(data, { binary: isBinary });
@@ -142,7 +134,8 @@ export class ZeniProxyClient {
 
           this.serverWs.on("message", (data, isBinary) => {
             if (this.localWs?.readyState === WebSocket.OPEN) {
-              this.localWs.send(data, { binary: isBinary });
+              const payload = hydrateSecretsPayload(data, isBinary, this.secrets);
+              this.localWs.send(payload, { binary: isBinary });
             }
           });
 
@@ -156,7 +149,6 @@ export class ZeniProxyClient {
 
       const cleanup = () => {
         if (this.isStopped) return;
-        console.log("[CLI Client] Connection lost. Cleaning up and shutting down...");
         this.stop();
       };
 
@@ -176,11 +168,9 @@ export class ZeniProxyClient {
       this.serverWs.on("close", cleanup);
 
       this.localWs.on("error", (err) => {
-        console.error("[CLI Client] Local Chrome WebSocket error:", err);
         handleError(err);
       });
       this.serverWs.on("error", (err) => {
-        console.error("[CLI Client] Server WebSocket error:", err);
         handleError(err);
       });
     });
@@ -188,7 +178,6 @@ export class ZeniProxyClient {
 
   public stop() {
     this.isStopped = true;
-    console.log("[CLI Client] Stopping client agent...");
 
     try {
       this.localWs?.close();
@@ -196,10 +185,30 @@ export class ZeniProxyClient {
     } catch {}
 
     if (this.chromeProcess) {
-      console.log("[CLI Client] Terminating Chrome browser process...");
       this.chromeProcess.kill();
       this.chromeProcess = null;
     }
+  }
+}
+
+function hydrateSecretsPayload(data: any, isBinary: boolean, secrets: Record<string, string>): any {
+  if (isBinary || !secrets || Object.keys(secrets).length === 0) {
+    return data;
+  }
+  try {
+    const str = typeof data === "string" ? data : data.toString("utf-8");
+    if (!str.includes("${secret.")) {
+      return data;
+    }
+    const hydrated = str.replace(/\$\{secret\.([a-zA-Z0-9_]+)\}/g, (match, key) => {
+      if (secrets[key] !== undefined) return secrets[key];
+      const foundKey = Object.keys(secrets).find((k) => k.toLowerCase() === key.toLowerCase());
+      if (foundKey && secrets[foundKey] !== undefined) return secrets[foundKey];
+      return match;
+    });
+    return typeof data === "string" ? hydrated : Buffer.from(hydrated, "utf-8");
+  } catch {
+    return data;
   }
 }
 
@@ -228,7 +237,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   });
 
   client.start().catch((err) => {
-    console.error("[CLI Client] Execution error:", err);
+    console.error("Execution error:", err);
     process.exit(1);
   });
 

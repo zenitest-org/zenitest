@@ -1,0 +1,35 @@
+id: tc_airbnb_002
+title: Airbnb Paris Stay Search Automation (Second Case)
+priority: high
+
+localURL: localhost:3000
+prodURL: https://www.airbnb.com
+
+variables:
+  city: Paris
+  checkIn: "2026-07-22"
+  checkOut: "2026-07-23"
+
+expectedResult: Airbnb search results in Paris for July 22-23 are displayed.
+
+steps:
+  - type: navigate
+    url: /
+
+  - type: act
+    description: Type '${city}' into the 'Search destinations' or 'Where' search input field
+
+  - type: act
+    description: Click on the time selection or 'Check in' date button
+
+  - type: act
+    description: Select ${checkIn} as start date from the calendar
+
+  - type: act
+    description: Select ${checkOut} as end date from the calendar
+
+  - type: act
+    description: Click on the Search button to execute the search
+
+  - type: validate
+    description: Verify that search results or stay listings in ${city} for ${checkIn} to ${checkOut} are displayed on the page

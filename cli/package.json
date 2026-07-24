@@ -10,9 +10,12 @@
     "download-chrome": "tsx download-chrome.ts"
   },
   "dependencies": {
+    "@types/js-yaml": "^4.0.9",
     "@types/ws": "^8.18.1",
     "dotenv": "^17.4.2",
+    "js-yaml": "^5.2.2",
     "tsx": "^4.16.2",
-    "ws": "^8.21.1"
+    "ws": "^8.21.1",
+    "yaml": "^2.9.0"
   }
 }

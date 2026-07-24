@@ -56,12 +56,8 @@ export async function downloadChromeHeadlessShell(): Promise<string> {
   const executablePath = join(TARGET_DIR, extractedFolderName, executableName);
 
   if (existsSync(executablePath)) {
-    console.log(`[Chrome Downloader] chrome-headless-shell already exists at: ${executablePath}`);
     return executablePath;
   }
-
-  console.log(`[Chrome Downloader] chrome-headless-shell not found at: ${executablePath}`);
-  console.log(`[Chrome Downloader] Detected platform: ${platformKey}. Fetching downloads info...`);
 
   const response = await fetch(API_URL);
   if (!response.ok) {
@@ -81,8 +77,6 @@ export async function downloadChromeHeadlessShell(): Promise<string> {
   }
 
   const downloadUrl = downloadInfo.url;
-  console.log(`[Chrome Downloader] Found stable version: ${data.channels.Stable.version}`);
-  console.log(`[Chrome Downloader] Downloading from ${downloadUrl}...`);
 
   if (!existsSync(TARGET_DIR)) {
     mkdirSync(TARGET_DIR, { recursive: true });
@@ -96,7 +90,6 @@ export async function downloadChromeHeadlessShell(): Promise<string> {
 
   const arrayBuffer = await fileResponse.arrayBuffer();
   writeFileSync(zipPath, Buffer.from(arrayBuffer));
-  console.log("[Chrome Downloader] Download complete. Extracting files...");
 
   if (process.platform === "win32") {
     execSync(`powershell -Command "Expand-Archive -Path '${zipPath}' -DestinationPath '${TARGET_DIR}' -Force"`);
@@ -104,11 +97,9 @@ export async function downloadChromeHeadlessShell(): Promise<string> {
     execSync(`unzip -o "${zipPath}" -d "${TARGET_DIR}"`);
   }
 
-  console.log("[Chrome Downloader] Extraction complete. Cleaning up zip file...");
   unlinkSync(zipPath);
 
   if (existsSync(executablePath)) {
-    console.log(`[Chrome Downloader] Successfully installed chrome-headless-shell to:\n${executablePath}`);
     return executablePath;
   } else {
     throw new Error(`Could not verify executable path: ${executablePath}`);

@@ -36,6 +36,19 @@ export async function authMiddleware(c: Context, next: Next) {
       token = c.req.query("accessToken") || c.req.query("access_token") || null;
     }
 
+    // 4. Check JSON request body if headers & query params are absent
+    if (!apiKey && !token && c.req.header("content-type")?.includes("application/json")) {
+      try {
+        const body = await c.req.json();
+        if (body) {
+          apiKey = body.apiKey || body.api_key || null;
+          token = token || body.accessToken || body.access_token || null;
+        }
+      } catch {
+        // Ignore JSON body parsing error
+      }
+    }
+
     let authenticatedUser: AuthUser | null = null;
 
     // Validate API Key against public.users table

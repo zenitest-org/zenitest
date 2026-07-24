@@ -1,6 +1,10 @@
 import "dotenv/config";
 import { chromium, Page, Locator } from "playwright-core";
 import OpenAI from "openai";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
+import { createHash } from "crypto";
 import {
   TestCase,
   TestCaseExecutionReport,
@@ -9,6 +13,65 @@ import {
   ActResult,
   StepResult
 } from "./types";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const SERVER_CACHE_DIR = join(__dirname, "..", ".cache", "executor");
+
+export class ExecutorCache {
+  private cacheDir: string;
+
+  constructor() {
+    this.cacheDir = SERVER_CACHE_DIR;
+    if (!existsSync(this.cacheDir)) {
+      mkdirSync(this.cacheDir, { recursive: true });
+    }
+  }
+
+  public generateKey(instruction: string, elements: DOMElement[], url?: string): string {
+    const serializedElements = elements.map((e) => ({
+      tag: e.tagName,
+      id: e.id,
+      text: e.text,
+      aria: e.ariaLabel,
+      placeholder: e.placeholder,
+      role: e.role,
+      value: e.value,
+    }));
+
+    const raw = `act:${url || ""}:${instruction}:${JSON.stringify(serializedElements)}`;
+    return createHash("sha256").update(raw).digest("hex");
+  }
+
+  public get<T>(key: string): T | null {
+    if (process.env.DISABLE_EXECUTOR_CACHE === "true" || process.env.NO_CACHE === "true") {
+      return null;
+    }
+    try {
+      const filePath = join(this.cacheDir, `${key}.json`);
+      if (existsSync(filePath)) {
+        const content = readFileSync(filePath, "utf-8");
+        const data = JSON.parse(content);
+        return data.result as T;
+      }
+    } catch {
+      // Ignore read errors
+    }
+    return null;
+  }
+
+  public set<T>(key: string, result: T): void {
+    if (process.env.DISABLE_EXECUTOR_CACHE === "true" || process.env.NO_CACHE === "true") {
+      return;
+    }
+    try {
+      const filePath = join(this.cacheDir, `${key}.json`);
+      writeFileSync(filePath, JSON.stringify({ key, result, createdAt: new Date().toISOString() }, null, 2), "utf-8");
+    } catch (err: any) {
+      console.warn("[Executor Cache] Failed to write cache:", err.message);
+    }
+  }
+}
 
 /* ==========================================================================
    Helper Functions for DOM Setteled & State Extraction
@@ -90,14 +153,14 @@ async function extractPageState(page: Page): Promise<{ elements: DOMElement[]; s
         element.setAttribute("data-element-id", String(elementId));
 
         const tagName = element.tagName;
-        const text = (element.innerText || element.textContent || "").trim().replace(/\\s+/g, " ").slice(0, 200);
-        const value = element.value || undefined;
+        const text = (element.innerText || element.textContent || "").trim().replace(/\s+/g, " ").slice(0, 200);
         const placeholder = element.getAttribute("placeholder") || undefined;
         const ariaLabel = element.getAttribute("aria-label") || undefined;
         const role = element.getAttribute("role") || undefined;
         const href = element.getAttribute("href") || undefined;
         const inputType = element.getAttribute("type") || undefined;
         const inputName = element.getAttribute("name") || undefined;
+        const value = inputType === "password" ? (element.value ? "********" : undefined) : (element.value || undefined);
 
         const disabled = element.disabled === true || element.hasAttribute("disabled");
         const checked = element.checked === true || element.hasAttribute("checked");
@@ -278,13 +341,23 @@ function formatDOMState(dom?: DOMElement[]): string {
     .join("\n");
 }
 
-function substituteVariables(instruction: string, variables?: Record<string, string>): string {
-  if (!variables) return instruction;
+function substituteVariables(instruction: string, variables?: Record<string, any>): string {
+  if (!variables || typeof variables !== "object") return instruction;
   let result = instruction;
-  for (const [key, value] of Object.entries(variables)) {
-    result = result.replaceAll(`%${key}%`, value).replaceAll(`{${key}}`, value);
+  for (const [key, rawVal] of Object.entries(variables)) {
+    if (rawVal === undefined || rawVal === null) continue;
+    const value = String(rawVal);
+    result = result
+      .replaceAll(`\$\{${key}\}`, value)
+      .replaceAll(`{${key}}`, value)
+      .replaceAll(`%${key}%`, value);
   }
   return result;
+}
+
+function maskSecretsInText(text: string): string {
+  if (!text || typeof text !== "string") return text;
+  return text.replace(/\$\{secret\.[a-zA-Z0-9_]+\}/g, "******");
 }
 
 function resolveFullURL(pathOrUrl: string, baseLocalUrl?: string, baseProdUrl?: string, targetType: "prod" | "local" = "prod"): string {
@@ -364,6 +437,7 @@ export class Executor {
   private cdpUrl: string;
   private openai: OpenAI;
   private model: string;
+  private cache: ExecutorCache;
 
   constructor(cdpUrl: string) {
     this.cdpUrl = cdpUrl;
@@ -376,13 +450,21 @@ export class Executor {
     const baseURL = process.env.OPENAI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta/openai/";
     this.openai = new OpenAI({ apiKey, baseURL });
     this.model = process.env.ZENI_MODEL || "gemini-3.5-flash";
+    this.cache = new ExecutorCache();
   }
 
-  public async run(testCase: TestCase): Promise<TestCaseExecutionReport> {
-    console.log(`[Executor] Connecting to client browser at ${this.cdpUrl}`);
-    const browser = await chromium.connectOverCDP(this.cdpUrl);
-    const context = browser.contexts()[0] || (await browser.newContext());
-    const page = context.pages()[0] || (await context.newPage());
+  public async runWithContext(
+    testCase: TestCase,
+    context: any,
+    onProgress?: (progress: {
+      stepIndex: number;
+      totalSteps: number;
+      stepType: string;
+      description: string;
+      status: "running" | "passed" | "failed";
+    }) => void
+  ): Promise<TestCaseExecutionReport> {
+    const page = await context.newPage();
     await page.setViewportSize({ width: 1280, height: 800 });
 
     const startTime = Date.now();
@@ -393,128 +475,180 @@ export class Executor {
     try {
       for (const step of testCase.steps) {
         const stepStartTime = Date.now();
-        console.log(`[Executor] Processing step ${step.index}: ${step.description}`);
+        const stepDescription = substituteVariables(step.description || step.url || "/", testCase.variables);
+        const maskedStepDescription = maskSecretsInText(stepDescription);
+        console.log(`[Executor] Processing step ${step.index}: ${maskedStepDescription}`);
+
+        if (onProgress) {
+          onProgress({
+            stepIndex: step.index,
+            totalSteps: testCase.steps.length,
+            stepType: step.type,
+            description: maskedStepDescription,
+            status: "running",
+          });
+        }
 
         const stepReport: StepExecutionReport = {
           index: step.index,
           type: step.type,
-          description: step.description,
+          description: maskedStepDescription,
           success: true,
           explanation: "",
           executionTimeMs: 0,
           tokensUsed: 0,
         };
 
-        if (step.type === "navigate") {
-          const targetUrl = resolveFullURL(step.description, testCase.localURL, testCase.prodURL, "prod");
-          console.log(`[Executor] Navigating browser page to ${targetUrl}`);
-          await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-          await waitForDomNetworkQuiet(page);
-          stepReport.explanation = `Successfully navigated to ${targetUrl}`;
-          stepReport.success = true;
-        } 
-        else if (step.type === "act") {
-          const state = await extractPageState(page);
-          stepReport.screenshotBase64 = state.screenshotBase64;
-
-          const instruction = substituteVariables(step.description, testCase.variables);
-          const domStr = formatDOMState(state.elements);
-
-          const systemPrompt = `You are Zeni Executor. Analyze the DOM and choose the single best action to fulfill the instruction.
-Valid actions: 'click', 'doubleClick', 'type', 'press', 'scroll', 'hover', 'select', 'dragAndDrop', 'nav', 'done'.
-If the goal is fully accomplished, set action to 'done'.`;
-
-          const userText = `### Instruction:\n${instruction}\n\n### Current Page DOM State:\n${domStr}`;
-          
-          const completion = await this.openai.chat.completions.create({
-            model: this.model,
-            temperature: 0.1,
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: [
-                { type: "text", text: userText },
-                { type: "image_url", image_url: { url: `data:image/png;base64,${state.screenshotBase64}` } }
-              ]}
-            ],
-            response_format: ACT_SCHEMA as any,
-          });
-
-          const responseText = completion.choices[0]?.message?.content || "{}";
-          const actResult = JSON.parse(responseText.replace(/```json\n?|\n?```/g, "").trim()) as ActResult;
-
-          stepReport.actResult = actResult;
-          stepReport.explanation = actResult.reasoning;
-          stepReport.tokensUsed = completion.usage?.total_tokens ?? 0;
-          totalTokensUsed += stepReport.tokensUsed;
-
-          console.log(`[Executor] Predicted action: ${actResult.action} | Reasoning: ${actResult.reasoning}`);
-          await executeActionOnPage(page, actResult);
-          stepReport.success = true;
-        } 
-        else if (step.type === "validate") {
-          const maxAttempts = 5;
-          let validationPassed = false;
-          let lastResult: StepResult | undefined;
-
-          for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-            if (attempt > 1) {
-              console.log(`[Executor] Validation attempt ${attempt} waiting for page to settle...`);
-              await page.waitForTimeout(2000);
-            }
-
+        try {
+          if (step.type === "navigate") {
+            const navPath = step.url || step.description || "/";
+            const targetUrl = resolveFullURL(navPath, testCase.localURL, testCase.prodURL, "prod");
+            console.log(`[Executor] Navigating browser page to ${targetUrl}`);
+            await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+            await waitForDomNetworkQuiet(page);
+            stepReport.explanation = `Successfully navigated to ${targetUrl}`;
+            stepReport.success = true;
+          } 
+          else if (step.type === "act") {
             const state = await extractPageState(page);
             stepReport.screenshotBase64 = state.screenshotBase64;
 
-            const instruction = substituteVariables(step.description, testCase.variables);
-            const domStr = formatDOMState(state.elements);
+            const instruction = stepDescription;
+            const cacheKey = this.cache.generateKey(instruction, state.elements, state.url);
+            const cachedActResult = this.cache.get<ActResult>(cacheKey);
 
-            const systemPrompt = `You are Zeni Executor. Verify the validation statement against the current DOM.
+            if (cachedActResult) {
+              console.log(`[Executor Cache HIT] Reusing cached action decision for step ${step.index}: ${cachedActResult.action}`);
+              stepReport.actResult = cachedActResult;
+              stepReport.explanation = `${cachedActResult.reasoning} (Cached)`;
+              stepReport.cachedResponse = true;
+              stepReport.cacheKey = cacheKey;
+              stepReport.tokensUsed = 0;
+
+              await executeActionOnPage(page, cachedActResult);
+              stepReport.success = true;
+            } else {
+              const domStr = formatDOMState(state.elements);
+
+              const systemPrompt = `You are Zeni Executor. Analyze the DOM and choose the single best action to fulfill the instruction.
+Valid actions: 'click', 'doubleClick', 'type', 'press', 'scroll', 'hover', 'select', 'dragAndDrop', 'nav', 'done'.
+If the goal is fully accomplished, set action to 'done'.`;
+
+              const userText = `### Instruction:\n${instruction}\n\n### Current Page DOM State:\n${domStr}`;
+              
+              const completion = await this.openai.chat.completions.create({
+                model: this.model,
+                temperature: 0.1,
+                messages: [
+                  { role: "system", content: systemPrompt },
+                  { role: "user", content: [
+                    { type: "text", text: userText },
+                    { type: "image_url", image_url: { url: `data:image/png;base64,${state.screenshotBase64}` } }
+                  ]}
+                ],
+                response_format: ACT_SCHEMA as any,
+              });
+
+              const responseText = completion.choices[0]?.message?.content || "{}";
+              const actResult = JSON.parse(responseText.replace(/```json\n?|\n?```/g, "").trim()) as ActResult;
+
+              stepReport.actResult = actResult;
+              stepReport.explanation = actResult.reasoning;
+              stepReport.tokensUsed = completion.usage?.total_tokens ?? 0;
+              totalTokensUsed += stepReport.tokensUsed;
+              stepReport.cacheKey = cacheKey;
+              stepReport.cachedResponse = false;
+
+              this.cache.set(cacheKey, actResult);
+
+              console.log(`[Executor] Predicted action: ${actResult.action} | Reasoning: ${actResult.reasoning}`);
+              await executeActionOnPage(page, actResult);
+              stepReport.success = true;
+            }
+          } 
+          else if (step.type === "validate") {
+            const maxAttempts = 5;
+            let validationPassed = false;
+            let lastResult: StepResult | undefined;
+
+            for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+              if (attempt > 1) {
+                console.log(`[Executor] Validation attempt ${attempt} waiting for page to settle...`);
+                await page.waitForTimeout(2000);
+              }
+
+              const state = await extractPageState(page);
+              stepReport.screenshotBase64 = state.screenshotBase64;
+
+              const instruction = stepDescription;
+              const domStr = formatDOMState(state.elements);
+
+              const systemPrompt = `You are Zeni Executor. Verify the validation statement against the current DOM.
 Set success to true if the condition is completely met.
 Set pageStillLoading to true if it failed ONLY because the page is still loading/skeleton loaders are visible.`;
 
-            const userText = `### Validation Statement:\n${instruction}\n\n### Current Page DOM State:\n${domStr}`;
+              const userText = `### Validation Statement:\n${instruction}\n\n### Current Page DOM State:\n${domStr}`;
 
-            const completion = await this.openai.chat.completions.create({
-              model: this.model,
-              temperature: 0.1,
-              messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: [
-                  { type: "text", text: userText },
-                  { type: "image_url", image_url: { url: `data:image/png;base64,${state.screenshotBase64}` } }
-                ]}
-              ],
-              response_format: VALIDATE_SCHEMA as any,
-            });
+              const completion = await this.openai.chat.completions.create({
+                model: this.model,
+                temperature: 0.1,
+                messages: [
+                  { role: "system", content: systemPrompt },
+                  { role: "user", content: [
+                    { type: "text", text: userText },
+                    { type: "image_url", image_url: { url: `data:image/png;base64,${state.screenshotBase64}` } }
+                  ]}
+                ],
+                response_format: VALIDATE_SCHEMA as any,
+              });
 
-            const responseText = completion.choices[0]?.message?.content || "{}";
-            const valResult = JSON.parse(responseText.replace(/```json\n?|\n?```/g, "").trim()) as StepResult;
+              const responseText = completion.choices[0]?.message?.content || "{}";
+              const valResult = JSON.parse(responseText.replace(/```json\n?|\n?```/g, "").trim()) as StepResult;
 
-            lastResult = valResult;
-            stepReport.tokensUsed += completion.usage?.total_tokens ?? 0;
-            totalTokensUsed += completion.usage?.total_tokens ?? 0;
+              stepReport.validationResult = valResult;
+              stepReport.tokensUsed += completion.usage?.total_tokens ?? 0;
+              totalTokensUsed += completion.usage?.total_tokens ?? 0;
+              lastResult = valResult;
 
-            console.log(`[Executor] Validation attempt ${attempt}: success=${valResult.success}, explanation="${valResult.explanation}"`);
+              if (valResult.success) {
+                validationPassed = true;
+                break;
+              }
 
-            if (valResult.success) {
-              validationPassed = true;
-              break;
-            } else if (!valResult.pageStillLoading) {
-              break; // Hard failure, don't retry
+              if (!valResult.pageStillLoading) {
+                break;
+              }
             }
-          }
 
-          stepReport.validationResult = lastResult;
-          stepReport.success = validationPassed;
-          stepReport.explanation = lastResult?.explanation || "Validation failed";
-          
-          if (!validationPassed) {
-            overallSuccess = false;
+            stepReport.success = validationPassed;
+            stepReport.explanation = lastResult ? lastResult.explanation : "Validation failed.";
           }
+        } catch (stepErr: any) {
+          console.error(`[Executor] Step ${step.index} threw exception:`, stepErr.message || stepErr);
+          stepReport.success = false;
+          stepReport.explanation = stepErr.message || String(stepErr);
+        }
+
+        // Always capture screenshot after step execution
+        try {
+          const screenshotBuffer = await page.screenshot({ type: "png", fullPage: false });
+          stepReport.screenshotBase64 = screenshotBuffer.toString("base64");
+        } catch (imgErr) {
+          console.warn(`[Executor] Failed to capture screenshot after step ${step.index}:`, imgErr);
         }
 
         stepReport.executionTimeMs = Date.now() - stepStartTime;
         stepReports.push(stepReport);
+
+        if (onProgress) {
+          onProgress({
+            stepIndex: step.index,
+            totalSteps: testCase.steps.length,
+            stepType: step.type,
+            description: stepReport.description,
+            status: stepReport.success ? "passed" : "failed",
+          });
+        }
 
         if (!stepReport.success) {
           overallSuccess = false;
@@ -522,11 +656,12 @@ Set pageStillLoading to true if it failed ONLY because the page is still loading
           break;
         }
       }
+      console.log(`[Server Log] Test case "${testCase.title}" (${testCase.id}) completed in ${Date.now() - startTime} ms. LLM Tokens Used: ${totalTokensUsed}`);
     } catch (err: any) {
       console.error("[Executor] Execution error:", err);
       overallSuccess = false;
     } finally {
-      await browser.close().catch(() => {});
+      await page.close().catch(() => {});
     }
 
     return {
@@ -538,5 +673,26 @@ Set pageStillLoading to true if it failed ONLY because the page is still loading
       totalExecutionTimeMs: Date.now() - startTime,
       totalTokensUsed,
     };
+  }
+
+  public async run(
+    testCase: TestCase,
+    onProgress?: (progress: {
+      stepIndex: number;
+      totalSteps: number;
+      stepType: string;
+      description: string;
+      status: "running" | "passed" | "failed";
+    }) => void
+  ): Promise<TestCaseExecutionReport> {
+    console.log(`[Executor] Connecting to client browser at ${this.cdpUrl}`);
+    const browser = await chromium.connectOverCDP(this.cdpUrl);
+    const context = await browser.newContext();
+    try {
+      return await this.runWithContext(testCase, context, onProgress);
+    } finally {
+      await context.close().catch(() => {});
+      await browser.close().catch(() => {});
+    }
   }
 }

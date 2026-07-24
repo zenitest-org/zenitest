@@ -1,5 +1,10 @@
 node_modules/
 chrome-headless-shell/
 .env
+secrets.yaml
+secrets.yml
+credentials.yaml
+credentials.yml
 *.png
 playwright-browsers/
+.cache

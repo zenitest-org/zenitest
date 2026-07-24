@@ -1,9 +1,34 @@
 import { Hono } from "hono";
+import { streamText } from "hono/streaming";
 import { WebSocket } from "ws";
+import { chromium } from "playwright-core";
 import { supabase, uploadScreenshot } from "../db/supabase";
 import { Executor } from "../executor";
 import { TestCase, TestCaseExecutionReport } from "../types";
 import { authMiddleware, AuthUser } from "../middleware/auth";
+
+async function runConcurrentTasks<T>(
+  items: T[],
+  concurrency: number,
+  fn: (item: T, index: number) => Promise<void>,
+): Promise<void> {
+  let index = 0;
+  const workers: Promise<void>[] = [];
+
+  const worker = async () => {
+    while (index < items.length) {
+      const currentIndex = index++;
+      await fn(items[currentIndex], currentIndex);
+    }
+  };
+
+  const limit = Math.min(Math.max(1, concurrency), items.length);
+  for (let i = 0; i < limit; i++) {
+    workers.push(worker());
+  }
+
+  await Promise.all(workers);
+}
 
 export interface ExecutionsRouteContext {
   clients: Map<string, WebSocket>;
@@ -13,18 +38,18 @@ export interface ExecutionsRouteContext {
 export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
   const router = new Hono();
 
-  // Apply authentication middleware to all execution endpoints
   router.use("*", authMiddleware);
 
   /* ==========================================================================
      Executions Endpoints
      ========================================================================== */
 
-  // GET /api/executions/query - Query/list executions with optional filtering & pagination
   router.get("/query", async (c) => {
     try {
       const authUser = c.get("user") as AuthUser;
-      const userId = c.req.query("userId") || (c.req.query("all") === "true" ? null : authUser.id);
+      const userId =
+        c.req.query("userId") ||
+        (c.req.query("all") === "true" ? null : authUser.id);
       const status = c.req.query("status");
       const limit = Number(c.req.query("limit")) || 20;
       const offset = Number(c.req.query("offset")) || 0;
@@ -47,8 +72,8 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
 
       return c.json({
         success: true,
-        data,
-        pagination: {
+        data: data || [],
+        meta: {
           total: count || 0,
           limit,
           offset,
@@ -60,11 +85,10 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
     }
   });
 
-  // GET /api/executions/get/:id - Get a single execution by ID (supports ?includeDetails=true)
-  router.get("/get/:id", async (c) => {
+  router.get("/:id", async (c) => {
     try {
       const id = c.req.param("id");
-      const includeDetails = c.req.query("includeDetails") === "true";
+      const includeDetails = c.req.query("details") === "true";
 
       const { data: execution, error } = await supabase
         .from("executions")
@@ -99,7 +123,19 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
     }
   });
 
-  // POST /api/executions/create - Create an execution AND trigger test case run(s)
+  // POST /api/executions/session - Generate a unique server-side clientId for a test execution session
+  router.post("/session", async (c) => {
+    try {
+      const clientId = `client_${crypto.randomUUID()}`;
+      return c.json({
+        success: true,
+        clientId,
+      });
+    } catch (err: any) {
+      return c.json({ success: false, error: err.message || String(err) }, 500);
+    }
+  });
+
   router.post("/create", async (c) => {
     try {
       const authUser = c.get("user") as AuthUser;
@@ -111,26 +147,40 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         environment = "production",
         testCase,
         testCases: rawTestCases,
+        parallel: rawParallel,
+        concurrency: rawConcurrency,
         metadata = {},
       } = body;
 
       const user_id = requestUserId || authUser.id;
+      const isStream =
+        c.req.header("x-stream") === "true" || c.req.query("stream") === "true";
+      const parallel = Number(rawParallel || rawConcurrency) || 5;
 
       if (!user_id) {
-        return c.json({ success: false, error: "Missing user identification" }, 400);
+        return c.json(
+          { success: false, error: "Missing user identification" },
+          400,
+        );
       }
 
-      // Consolidate test cases array
-      const testCasesArray: TestCase[] = rawTestCases || (testCase ? [testCase] : []);
+      const testCasesArray: TestCase[] =
+        rawTestCases || (testCase ? [testCase] : []);
 
       if (testCasesArray.length > 0 && !clientId) {
-        return c.json({ success: false, error: "Missing clientId for test execution" }, 400);
+        return c.json(
+          { success: false, error: "Missing clientId for test execution" },
+          400,
+        );
       }
 
       if (clientId && !ctx.clients.has(clientId)) {
         return c.json(
-          { success: false, error: `No active proxy client connected for clientId: ${clientId}` },
-          400
+          {
+            success: false,
+            error: `No active proxy client connected for clientId: ${clientId}`,
+          },
+          400,
         );
       }
 
@@ -140,7 +190,6 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           ? `Execution: ${testCasesArray[0].title}`
           : `Execution Run ${new Date().toISOString()}`);
 
-      // 1. Insert initial execution record in Supabase
       const { data: execution, error: execError } = await supabase
         .from("executions")
         .insert({
@@ -156,22 +205,203 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         .single();
 
       if (execError || !execution) {
-        console.error("[Executions Route] Error creating execution record:", execError);
-        return c.json({ success: false, error: execError?.message || "Failed to create execution" }, 400);
+        console.error(
+          "[Executions Route] Error creating execution record:",
+          execError,
+        );
+        return c.json(
+          {
+            success: false,
+            error: execError?.message || "Failed to create execution",
+          },
+          400,
+        );
       }
 
-      // If no test cases passed, return early with created execution
       if (testCasesArray.length === 0 || !clientId) {
         return c.json({ success: true, data: execution }, 201);
       }
 
-      // 2. Execute test cases sequentially and save details
+      const wsUrl = `ws://localhost:${ctx.port}/browser/${clientId}`;
+
+      if (isStream) {
+        return streamText(c, async (stream) => {
+          await stream.writeln(
+            JSON.stringify({ type: "init", executionId: execution.id }),
+          );
+          let passedCount = 0;
+          let failedCount = 0;
+          let totalDurationMs = 0;
+
+          let browser: any = null;
+          try {
+            browser = await chromium.connectOverCDP(wsUrl);
+          } catch (connErr: any) {
+            console.error("[Executions Route] CDP Connection Error:", connErr);
+            await stream.writeln(
+              JSON.stringify({
+                type: "execution_complete",
+                executionId: execution.id,
+                passedCount: 0,
+                failedCount: testCasesArray.length,
+                totalDurationMs: 0,
+                error: connErr.message || String(connErr),
+              }),
+            );
+            return;
+          }
+
+          const executor = new Executor(wsUrl);
+
+          await runConcurrentTasks(testCasesArray, parallel, async (tc) => {
+            const { data: detailRecord } = await supabase
+              .from("execution_details")
+              .insert({
+                execution_id: execution.id,
+                test_case_id: tc.id || `tc_${Date.now()}`,
+                title: tc.title || "Untitled Test Case",
+                status: "running",
+                target_url: tc.prodURL || tc.localURL || null,
+                started_at: new Date().toISOString(),
+              })
+              .select()
+              .single();
+
+            const startTime = Date.now();
+            let context: any = null;
+            let report: TestCaseExecutionReport;
+
+            try {
+              context = await browser.newContext();
+              report = await executor.runWithContext(
+                tc,
+                context,
+                (progress) => {
+                  stream.writeln(
+                    JSON.stringify({
+                      type: "step_progress",
+                      testCaseId: tc.id || "tc",
+                      title: tc.title || "Untitled",
+                      ...progress,
+                    }),
+                  );
+                },
+              );
+            } catch (err: any) {
+              report = {
+                testCaseId: tc.id || "unknown",
+                title: tc.title || "Untitled",
+                overallSuccess: false,
+                targetURL: tc.prodURL || tc.localURL || "",
+                stepReports: [],
+                totalExecutionTimeMs: Date.now() - startTime,
+                totalTokensUsed: 0,
+                error: err.message || String(err),
+              };
+            } finally {
+              if (context) await context.close().catch(() => {});
+            }
+
+            const durationMs =
+              report.totalExecutionTimeMs || Date.now() - startTime;
+            if (report.overallSuccess) passedCount++;
+            else failedCount++;
+            totalDurationMs += durationMs;
+
+            const processedStepReports: any[] = [];
+            for (const stepReport of report.stepReports || []) {
+              const reportCopy = { ...stepReport };
+              if (reportCopy.screenshotBase64) {
+                const uploadResult = await uploadScreenshot(
+                  execution.id,
+                  tc.id || "tc",
+                  reportCopy.index,
+                  reportCopy.screenshotBase64,
+                );
+                if (uploadResult) {
+                  reportCopy.screenshotPath = uploadResult.path;
+                }
+                delete reportCopy.screenshotBase64;
+              }
+              processedStepReports.push(reportCopy);
+            }
+
+            if (detailRecord) {
+              await supabase
+                .from("execution_details")
+                .update({
+                  status: report.overallSuccess ? "passed" : "failed",
+                  duration_ms: durationMs,
+                  step_reports: processedStepReports,
+                  error_message: report.error || null,
+                  completed_at: new Date().toISOString(),
+                })
+                .eq("id", detailRecord.id);
+            }
+
+            await stream.writeln(
+              JSON.stringify({
+                type: "test_complete",
+                testCaseId: tc.id || "tc",
+                title: tc.title || "Untitled",
+                status: report.overallSuccess ? "PASSED" : "FAILED",
+                durationMs,
+                error: report.error,
+              }),
+            );
+          });
+
+          await browser.close().catch(() => {});
+
+          await supabase
+            .from("executions")
+            .update({
+              status: failedCount > 0 ? "failed" : "completed",
+              passed_test_cases: passedCount,
+              failed_test_cases: failedCount,
+              total_duration_ms: totalDurationMs,
+              completed_at: new Date().toISOString(),
+            })
+            .eq("id", execution.id);
+
+          await stream.writeln(
+            JSON.stringify({
+              type: "execution_complete",
+              executionId: execution.id,
+              passedCount,
+              failedCount,
+              totalDurationMs,
+            }),
+          );
+        });
+      }
+
       let passedCount = 0;
       let failedCount = 0;
       let totalDurationMs = 0;
       let totalTokens = 0;
 
-      for (const tc of testCasesArray) {
+      let browser: any = null;
+      try {
+        browser = await chromium.connectOverCDP(wsUrl);
+      } catch (connErr: any) {
+        console.error("[Executions Route] CDP Connection Error:", connErr);
+        await supabase
+          .from("executions")
+          .update({
+            status: "failed",
+            completed_at: new Date().toISOString(),
+          })
+          .eq("id", execution.id);
+        return c.json(
+          { success: false, error: connErr.message || String(connErr) },
+          500,
+        );
+      }
+
+      const executor = new Executor(wsUrl);
+
+      await runConcurrentTasks(testCasesArray, parallel, async (tc) => {
         const { data: detailRecord, error: detailErr } = await supabase
           .from("execution_details")
           .insert({
@@ -185,20 +415,14 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           .select()
           .single();
 
-        if (detailErr || !detailRecord) {
-          console.error("[Executions Route] Error creating execution detail record:", detailErr);
-          continue;
-        }
+        if (detailErr || !detailRecord) return;
 
-        console.log(`[Executions Route] Executing test case "${tc.title}" for execution ${execution.id}`);
-
-        const wsUrl = `ws://localhost:${ctx.port}/browser/${clientId}`;
-        const executor = new Executor(wsUrl);
         const startTime = Date.now();
-
+        let context: any = null;
         let report: TestCaseExecutionReport;
         try {
-          report = await executor.run(tc);
+          context = await browser.newContext();
+          report = await executor.runWithContext(tc, context);
         } catch (runErr: any) {
           report = {
             testCaseId: tc.id || "unknown",
@@ -210,6 +434,8 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             totalTokensUsed: 0,
             error: runErr.message || String(runErr),
           };
+        } finally {
+          if (context) await context.close().catch(() => {});
         }
 
         const endTime = Date.now();
@@ -223,7 +449,6 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         totalDurationMs += durationMs;
         totalTokens += tokensUsed;
 
-        // Process step reports to upload screenshots to Supabase storage bucket 'screenshots'
         const processedStepReports: any[] = [];
         for (const stepReport of report.stepReports || []) {
           const reportCopy = { ...stepReport };
@@ -232,7 +457,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
               execution.id,
               tc.id || "tc",
               reportCopy.index,
-              reportCopy.screenshotBase64
+              reportCopy.screenshotBase64,
             );
             if (uploadResult) {
               reportCopy.screenshotPath = uploadResult.path;
@@ -242,21 +467,20 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           processedStepReports.push(reportCopy);
         }
 
-        // Update detail record in Supabase with step_reports containing screenshotPath
         await supabase
           .from("execution_details")
           .update({
             status: isSuccess ? "passed" : "failed",
             duration_ms: durationMs,
-            tokens_used: tokensUsed,
             step_reports: processedStepReports,
             error_message: report.error || null,
             completed_at: new Date().toISOString(),
           })
           .eq("id", detailRecord.id);
-      }
+      });
 
-      // 3. Update execution record with final status & totals
+      await browser.close().catch(() => {});
+
       const overallStatus = failedCount > 0 ? "failed" : "completed";
       const { data: updatedExecution } = await supabase
         .from("executions")
@@ -265,14 +489,12 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           passed_test_cases: passedCount,
           failed_test_cases: failedCount,
           total_duration_ms: totalDurationMs,
-          total_tokens_used: totalTokens,
           completed_at: new Date().toISOString(),
         })
         .eq("id", execution.id)
         .select()
         .single();
 
-      // 4. Fetch all created execution_details
       const { data: finalDetails } = await supabase
         .from("execution_details")
         .select("*")
@@ -287,10 +509,13 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             details: finalDetails || [],
           },
         },
-        201
+        201,
       );
     } catch (err: any) {
-      console.error("[Executions Route] Exception in POST /api/executions/create:", err);
+      console.error(
+        "[Executions Route] Exception in POST /api/executions/create:",
+        err,
+      );
       return c.json({ success: false, error: err.message || String(err) }, 500);
     }
   });
@@ -302,10 +527,14 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
   // GET /api/executions/details/query - List details for an execution (supports ?executionId=...)
   const queryDetailsHandler = async (c: any) => {
     try {
-      const executionId = c.req.param("executionId") || c.req.query("executionId");
+      const executionId =
+        c.req.param("executionId") || c.req.query("executionId");
 
       if (!executionId) {
-        return c.json({ success: false, error: "Missing required executionId parameter" }, 400);
+        return c.json(
+          { success: false, error: "Missing required executionId parameter" },
+          400,
+        );
       }
 
       const { data, error } = await supabase
@@ -315,13 +544,19 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         .order("created_at", { ascending: true });
 
       if (error) {
-        console.error("[Executions Route] Error querying execution details:", error);
+        console.error(
+          "[Executions Route] Error querying execution details:",
+          error,
+        );
         return c.json({ success: false, error: error.message }, 500);
       }
 
       return c.json({ success: true, data });
     } catch (err: any) {
-      console.error("[Executions Route] Exception querying execution details:", err);
+      console.error(
+        "[Executions Route] Exception querying execution details:",
+        err,
+      );
       return c.json({ success: false, error: err.message || String(err) }, 500);
     }
   };
@@ -340,12 +575,18 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         .single();
 
       if (error || !data) {
-        return c.json({ success: false, error: "Execution detail not found" }, 404);
+        return c.json(
+          { success: false, error: "Execution detail not found" },
+          404,
+        );
       }
 
       return c.json({ success: true, data });
     } catch (err: any) {
-      console.error("[Executions Route] Exception getting execution detail:", err);
+      console.error(
+        "[Executions Route] Exception getting execution detail:",
+        err,
+      );
       return c.json({ success: false, error: err.message || String(err) }, 500);
     }
   });
@@ -368,8 +609,12 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
 
       if (!execution_id || !test_case_id || !title) {
         return c.json(
-          { success: false, error: "Missing required fields: execution_id, test_case_id, and title" },
-          400
+          {
+            success: false,
+            error:
+              "Missing required fields: execution_id, test_case_id, and title",
+          },
+          400,
         );
       }
 
@@ -382,7 +627,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             execution_id,
             test_case_id,
             reportCopy.index || 0,
-            reportCopy.screenshotBase64
+            reportCopy.screenshotBase64,
           );
           if (uploadResult) {
             reportCopy.screenshotPath = uploadResult.path;
@@ -401,7 +646,6 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           status,
           target_url,
           duration_ms,
-          tokens_used,
           step_reports: processedStepReports,
           error_message,
           started_at: status === "running" ? new Date().toISOString() : null,
@@ -410,13 +654,19 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         .single();
 
       if (error) {
-        console.error("[Executions Route] Error creating execution detail:", error);
+        console.error(
+          "[Executions Route] Error creating execution detail:",
+          error,
+        );
         return c.json({ success: false, error: error.message }, 400);
       }
 
       return c.json({ success: true, data }, 201);
     } catch (err: any) {
-      console.error("[Executions Route] Exception creating execution detail:", err);
+      console.error(
+        "[Executions Route] Exception creating execution detail:",
+        err,
+      );
       return c.json({ success: false, error: err.message || String(err) }, 500);
     }
   });
