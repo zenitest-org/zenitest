@@ -1,0 +1,22 @@
+{
+  "name": "zenitest-monorepo",
+  "private": true,
+  "packageManager": "bun@1.3.14",
+  "workspaces": [
+    "api",
+    "app",
+    "cli"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "server": "turbo run server",
+    "client": "turbo run client",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "zenitest": "tsx cli/src/cli.ts"
+  },
+  "devDependencies": {
+    "turbo": "^2.0.11"
+  }
+}

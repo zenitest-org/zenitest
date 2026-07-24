@@ -1,0 +1,46 @@
+{
+  "id": "tc_airbnb_001",
+  "title": "Airbnb Paris Stay Search Automation",
+  "localURL": "localhost:3000",
+  "prodURL": "https://www.airbnb.com",
+  "steps": [
+    {
+      "index": 1,
+      "type": "navigate",
+      "description": "https://www.airbnb.com"
+    },
+    {
+      "index": 2,
+      "type": "act",
+      "description": "Type 'Paris' into the 'Search destinations' or 'Where' search input field"
+    },
+    {
+      "index": 3,
+      "type": "act",
+      "description": "Click on the time selection or 'Check in' date button"
+    },
+    {
+      "index": 4,
+      "type": "act",
+      "description": "Select 22 July as start date from the calendar"
+    },
+    {
+      "index": 5,
+      "type": "act",
+      "description": "Select 23 July as end date from the calendar"
+    },
+    {
+      "index": 6,
+      "type": "act",
+      "description": "Click on the Search button to execute the search"
+    },
+    {
+      "index": 7,
+      "type": "validate",
+      "description": "Verify that search results or stay listings in Paris for July 22-23 are displayed on the page"
+    }
+  ],
+  "variables": {},
+  "expectedResult": "Airbnb search results in Paris for July 22-23 are displayed.",
+  "priority": "high"
+}

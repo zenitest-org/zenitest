@@ -1,0 +1,5 @@
+node_modules/
+chrome-headless-shell/
+.env
+*.png
+playwright-browsers/
