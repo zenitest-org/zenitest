@@ -10,17 +10,12 @@ variables:
 expectedResult: Swag Labs inventory page is displayed after login.
 
 steps:
-  - type: navigate
-    url: /
+  - navigate: /
 
-  - type: act
-    description: Type '${username}' into the 'Username' input field
+  - act: Type '${username}' into the 'Username' input field
 
-  - type: act
-    description: Type '${secret.SAUCE_PASSWORD}' into the 'Password' input field
+  - act: Type '${secret.SAUCE_PASSWORD}' into the 'Password' input field
 
-  - type: act
-    description: Click on the 'Login' button
+  - act: Click on the 'Login' button
 
-  - type: validate
-    description: Verify that the product inventory container or 'Products' page title is displayed on the page
+  - validate: Verify that the product inventory container or 'Products' page title is displayed on the page

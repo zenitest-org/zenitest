@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { chromium, Page, Locator } from "playwright-core";
-import OpenAI from "openai";
+import { GoogleGenAI, Type } from "@google/genai";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
@@ -28,7 +28,7 @@ export class ExecutorCache {
     }
   }
 
-  public generateKey(instruction: string, elements: DOMElement[], url?: string): string {
+  public generateKey(instruction: string, elements: DOMElement[], url?: string, type: string = "act"): string {
     const serializedElements = elements.map((e) => ({
       tag: e.tagName,
       id: e.id,
@@ -39,7 +39,7 @@ export class ExecutorCache {
       value: e.value,
     }));
 
-    const raw = `act:${url || ""}:${instruction}:${JSON.stringify(serializedElements)}`;
+    const raw = `${type}:${url || ""}:${instruction}:${JSON.stringify(serializedElements)}`;
     return createHash("sha256").update(raw).digest("hex");
   }
 
@@ -232,6 +232,17 @@ async function getLocatorForTarget(page: Page, targetId?: string | number): Prom
   return page.locator(`${elementSelector}, #${idStr}`).first();
 }
 
+async function isElementDisabled(locator: Locator): Promise<boolean> {
+  try {
+    if (await locator.isDisabled({ timeout: 1000 })) return true;
+    const ariaDisabled = await locator.getAttribute("aria-disabled", { timeout: 1000 }).catch(() => null);
+    if (ariaDisabled === "true") return true;
+  } catch {
+    // Ignore resolution errors
+  }
+  return false;
+}
+
 async function executeActionOnPage(page: Page, actResult: ActResult): Promise<boolean> {
   const { action, targetElementId, text, key, direction, value, toElementId, url } = actResult;
   console.log(`[Executor] Performing action: ${action} | Target: ${targetElementId || "N/A"}`);
@@ -251,12 +262,18 @@ async function executeActionOnPage(page: Page, actResult: ActResult): Promise<bo
   switch (action) {
     case "click":
       if (!locator) throw new Error(`No locator found for target: ${targetElementId}`);
+      if (await isElementDisabled(locator)) {
+        throw new Error(`Cannot perform click: element '${targetElementId}' is disabled.`);
+      }
       await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
       await locator.click({ timeout: 5000 });
       break;
 
     case "doubleClick":
       if (!locator) throw new Error(`No locator found for target: ${targetElementId}`);
+      if (await isElementDisabled(locator)) {
+        throw new Error(`Cannot perform doubleClick: element '${targetElementId}' is disabled.`);
+      }
       await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
       await locator.dblclick({ timeout: 5000 });
       break;
@@ -271,6 +288,9 @@ async function executeActionOnPage(page: Page, actResult: ActResult): Promise<bo
     case "press":
       const keyStr = key || "Enter";
       if (locator && (await locator.count()) > 0) {
+        if (await isElementDisabled(locator)) {
+          throw new Error(`Cannot perform press: element '${targetElementId}' is disabled.`);
+        }
         await locator.press(keyStr, { timeout: 5000 });
       } else {
         await page.keyboard.press(keyStr);
@@ -294,6 +314,9 @@ async function executeActionOnPage(page: Page, actResult: ActResult): Promise<bo
 
     case "select":
       if (!locator) throw new Error(`No locator found for target: ${targetElementId}`);
+      if (await isElementDisabled(locator)) {
+        throw new Error(`Cannot perform select: element '${targetElementId}' is disabled.`);
+      }
       await locator.selectOption(value || text || "", { timeout: 5000 });
       break;
 
@@ -383,63 +406,52 @@ function resolveFullURL(pathOrUrl: string, baseLocalUrl?: string, baseProdUrl?: 
    ========================================================================== */
 
 const ACT_SCHEMA = {
-  type: "json_schema",
-  json_schema: {
-    name: "act_response",
-    strict: true,
-    schema: {
-      type: "object",
-      properties: {
-        action: {
-          type: "string",
-          enum: ["click", "doubleClick", "type", "press", "scroll", "hover", "select", "dragAndDrop", "nav", "done"],
-          description: "The action type to perform",
-        },
-        targetElementId: { type: ["string", "null"], description: "ID or index of element to interact with" },
-        targetDescription: { type: ["string", "null"], description: "Visual or structural description of target element" },
-        text: { type: ["string", "null"], description: "Text payload if action is 'type'" },
-        direction: { type: ["string", "null"], enum: ["up", "down", "left", "right", "top", "bottom", null], description: "Direction if action is 'scroll'" },
-        key: { type: ["string", "null"], description: "Key name if action is 'press'" },
-        value: { type: ["string", "null"], description: "Option value if action is 'select'" },
-        toElementId: { type: ["string", "null"], description: "Target element ID if action is 'dragAndDrop'" },
-        url: { type: ["string", "null"], description: "URL if action is 'nav'" },
-        reasoning: { type: "string", description: "Step-by-step reasoning for choosing this action" },
-      },
-      required: ["action", "targetElementId", "targetDescription", "text", "direction", "key", "value", "toElementId", "url", "reasoning"],
-      additionalProperties: false,
+  type: Type.OBJECT,
+  properties: {
+    action: {
+      type: Type.STRING,
+      enum: ["click", "doubleClick", "type", "press", "scroll", "hover", "select", "dragAndDrop", "nav", "done"],
+      description: "The action type to perform",
     },
+    targetElementId: { type: Type.STRING, description: "ID or index of element to interact with", nullable: true },
+    targetDescription: { type: Type.STRING, description: "Visual or structural description of target element", nullable: true },
+    text: { type: Type.STRING, description: "Text payload if action is 'type'", nullable: true },
+    direction: { type: Type.STRING, enum: ["up", "down", "left", "right", "top", "bottom"], description: "Direction if action is 'scroll'", nullable: true },
+    key: { type: Type.STRING, description: "Key name if action is 'press'", nullable: true },
+    value: { type: Type.STRING, description: "Option value if action is 'select'", nullable: true },
+    toElementId: { type: Type.STRING, description: "Target element ID if action is 'dragAndDrop'", nullable: true },
+    url: { type: Type.STRING, description: "URL if action is 'nav'", nullable: true },
+    reasoning: { type: Type.STRING, description: "Step-by-step reasoning for choosing this action" },
   },
+  required: ["action", "reasoning"],
 };
 
 const VALIDATE_SCHEMA = {
-  type: "json_schema",
-  json_schema: {
-    name: "validate_response",
-    strict: true,
-    schema: {
-      type: "object",
-      properties: {
-        success: { type: "boolean", description: "true if the validation criteria is met, false otherwise" },
-        explanation: { type: "string", description: "Reason for result" },
-        pageStillLoading: { type: "boolean", description: "true if page is not settled yet" },
-      },
-      required: ["success", "explanation", "pageStillLoading"],
-      additionalProperties: false,
-    },
+  type: Type.OBJECT,
+  properties: {
+    success: { type: Type.BOOLEAN, description: "true if the validation criteria is met, false otherwise" },
+    explanation: { type: Type.STRING, description: "Reason for result" },
+    pageStillLoading: { type: Type.BOOLEAN, description: "true if page is not settled yet" },
   },
+  required: ["success", "explanation", "pageStillLoading"],
 };
 
 /* ==========================================================================
    Executor Class
    ========================================================================== */
 
+export interface ExecutorOptions {
+  sendScreenshot?: boolean;
+}
+
 export class Executor {
   private cdpUrl: string;
-  private openai: OpenAI;
+  private ai: GoogleGenAI;
   private model: string;
   private cache: ExecutorCache;
+  private sendScreenshot: boolean;
 
-  constructor(cdpUrl: string) {
+  constructor(cdpUrl: string, options?: ExecutorOptions) {
     this.cdpUrl = cdpUrl;
     
     const apiKey = process.env.GEMINI_API_KEY;
@@ -447,10 +459,10 @@ export class Executor {
       throw new Error("Missing GEMINI_API_KEY environment variable");
     }
 
-    const baseURL = process.env.OPENAI_BASE_URL || "https://generativelanguage.googleapis.com/v1beta/openai/";
-    this.openai = new OpenAI({ apiKey, baseURL });
-    this.model = process.env.ZENI_MODEL || "gemini-3.5-flash";
+    this.ai = new GoogleGenAI({ apiKey });
+    this.model = process.env.ZENI_MODEL || "gemini-3.5-flash-lite";
     this.cache = new ExecutorCache();
+    this.sendScreenshot = options?.sendScreenshot ?? (process.env.SEND_SCREENSHOT === "true" || process.env.SEND_SCREENSHOT_TO_GEMINI === "true");
   }
 
   public async runWithContext(
@@ -462,8 +474,10 @@ export class Executor {
       stepType: string;
       description: string;
       status: "running" | "passed" | "failed";
-    }) => void
+    }) => void,
+    options?: ExecutorOptions
   ): Promise<TestCaseExecutionReport> {
+    const shouldSendScreenshot = options?.sendScreenshot ?? this.sendScreenshot;
     const page = await context.newPage();
     await page.setViewportSize({ width: 1280, height: 800 });
 
@@ -473,7 +487,37 @@ export class Executor {
     let totalTokensUsed = 0;
 
     try {
-      for (const step of testCase.steps) {
+      const normalizedSteps = (testCase.steps || []).map((s: any, idx: number) => {
+        if (typeof s === "object" && s !== null) {
+          let stepType = s.type;
+          let stepUrl = s.url;
+          let stepDesc = s.description;
+
+          if (!stepType) {
+            if (s.navigate !== undefined) {
+              stepType = "navigate";
+              stepUrl = s.navigate;
+              stepDesc = typeof s.navigate === "string" ? s.navigate : "/";
+            } else if (s.act !== undefined) {
+              stepType = "act";
+              stepDesc = s.act;
+            } else if (s.validate !== undefined) {
+              stepType = "validate";
+              stepDesc = s.validate;
+            }
+          }
+
+          return {
+            index: s.index ?? (idx + 1),
+            type: stepType,
+            url: stepUrl,
+            description: stepDesc || (stepType === "navigate" ? (stepUrl || "/") : ""),
+          };
+        }
+        return s;
+      });
+
+      for (const step of normalizedSteps) {
         const stepStartTime = Date.now();
         const stepDescription = substituteVariables(step.description || step.url || "/", testCase.variables);
         const maskedStepDescription = maskSecretsInText(stepDescription);
@@ -536,25 +580,37 @@ If the goal is fully accomplished, set action to 'done'.`;
 
               const userText = `### Instruction:\n${instruction}\n\n### Current Page DOM State:\n${domStr}`;
               
-              const completion = await this.openai.chat.completions.create({
+              const actParts: any[] = [{ text: `${systemPrompt}\n\n${userText}` }];
+              if (shouldSendScreenshot && state.screenshotBase64) {
+                actParts.push({
+                  inlineData: {
+                    mimeType: "image/png",
+                    data: state.screenshotBase64,
+                  },
+                });
+              }
+
+              const response = await this.ai.models.generateContent({
                 model: this.model,
-                temperature: 0.1,
-                messages: [
-                  { role: "system", content: systemPrompt },
-                  { role: "user", content: [
-                    { type: "text", text: userText },
-                    { type: "image_url", image_url: { url: `data:image/png;base64,${state.screenshotBase64}` } }
-                  ]}
+                contents: [
+                  {
+                    role: "user",
+                    parts: actParts,
+                  },
                 ],
-                response_format: ACT_SCHEMA as any,
+                config: {
+                  temperature: 0.1,
+                  responseMimeType: "application/json",
+                  responseSchema: ACT_SCHEMA,
+                },
               });
 
-              const responseText = completion.choices[0]?.message?.content || "{}";
+              const responseText = response.text || "{}";
               const actResult = JSON.parse(responseText.replace(/```json\n?|\n?```/g, "").trim()) as ActResult;
 
               stepReport.actResult = actResult;
               stepReport.explanation = actResult.reasoning;
-              stepReport.tokensUsed = completion.usage?.total_tokens ?? 0;
+              stepReport.tokensUsed = response.usageMetadata?.totalTokenCount ?? 0;
               totalTokensUsed += stepReport.tokensUsed;
               stepReport.cacheKey = cacheKey;
               stepReport.cachedResponse = false;
@@ -581,42 +637,81 @@ If the goal is fully accomplished, set action to 'done'.`;
               stepReport.screenshotBase64 = state.screenshotBase64;
 
               const instruction = stepDescription;
-              const domStr = formatDOMState(state.elements);
+              const cacheKey = this.cache.generateKey(instruction, state.elements, state.url, "validate");
+              const cachedValResult = this.cache.get<StepResult>(cacheKey);
 
-              const systemPrompt = `You are Zeni Executor. Verify the validation statement against the current DOM.
+              if (cachedValResult) {
+                console.log(`[Executor Cache HIT] Reusing cached validation decision for step ${step.index}: success=${cachedValResult.success}`);
+                stepReport.validationResult = cachedValResult;
+                stepReport.explanation = `${cachedValResult.explanation} (Cached)`;
+                stepReport.cachedResponse = true;
+                stepReport.cacheKey = cacheKey;
+                stepReport.tokensUsed = 0;
+                lastResult = cachedValResult;
+
+                if (cachedValResult.success) {
+                  validationPassed = true;
+                  break;
+                }
+
+                if (!cachedValResult.pageStillLoading) {
+                  break;
+                }
+              } else {
+                const domStr = formatDOMState(state.elements);
+
+                const systemPrompt = `You are Zeni Executor. Verify the validation statement against the current DOM.
 Set success to true if the condition is completely met.
 Set pageStillLoading to true if it failed ONLY because the page is still loading/skeleton loaders are visible.`;
 
-              const userText = `### Validation Statement:\n${instruction}\n\n### Current Page DOM State:\n${domStr}`;
+                const userText = `### Validation Statement:\n${instruction}\n\n### Current Page DOM State:\n${domStr}`;
 
-              const completion = await this.openai.chat.completions.create({
-                model: this.model,
-                temperature: 0.1,
-                messages: [
-                  { role: "system", content: systemPrompt },
-                  { role: "user", content: [
-                    { type: "text", text: userText },
-                    { type: "image_url", image_url: { url: `data:image/png;base64,${state.screenshotBase64}` } }
-                  ]}
-                ],
-                response_format: VALIDATE_SCHEMA as any,
-              });
+                const valParts: any[] = [{ text: `${systemPrompt}\n\n${userText}` }];
+                if (shouldSendScreenshot && state.screenshotBase64) {
+                  valParts.push({
+                    inlineData: {
+                      mimeType: "image/png",
+                      data: state.screenshotBase64,
+                    },
+                  });
+                }
 
-              const responseText = completion.choices[0]?.message?.content || "{}";
-              const valResult = JSON.parse(responseText.replace(/```json\n?|\n?```/g, "").trim()) as StepResult;
+                const response = await this.ai.models.generateContent({
+                  model: this.model,
+                  contents: [
+                    {
+                      role: "user",
+                      parts: valParts,
+                    },
+                  ],
+                  config: {
+                    temperature: 0.1,
+                    responseMimeType: "application/json",
+                    responseSchema: VALIDATE_SCHEMA,
+                  },
+                });
 
-              stepReport.validationResult = valResult;
-              stepReport.tokensUsed += completion.usage?.total_tokens ?? 0;
-              totalTokensUsed += completion.usage?.total_tokens ?? 0;
-              lastResult = valResult;
+                const responseText = response.text || "{}";
+                const valResult = JSON.parse(responseText.replace(/```json\n?|\n?```/g, "").trim()) as StepResult;
 
-              if (valResult.success) {
-                validationPassed = true;
-                break;
-              }
+                stepReport.validationResult = valResult;
+                stepReport.tokensUsed += response.usageMetadata?.totalTokenCount ?? 0;
+                totalTokensUsed += response.usageMetadata?.totalTokenCount ?? 0;
+                stepReport.cacheKey = cacheKey;
+                stepReport.cachedResponse = false;
 
-              if (!valResult.pageStillLoading) {
-                break;
+                this.cache.set(cacheKey, valResult);
+
+                lastResult = valResult;
+
+                if (valResult.success) {
+                  validationPassed = true;
+                  break;
+                }
+
+                if (!valResult.pageStillLoading) {
+                  break;
+                }
               }
             }
 

@@ -8,3 +8,5 @@ credentials.yml
 *.png
 playwright-browsers/
 .cache
+.turbo
+zeni_tests

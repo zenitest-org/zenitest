@@ -535,12 +535,35 @@ async function runTests(options: Record<string, any>) {
       }
 
       if (testCase && testCase.id && testCase.title && Array.isArray(testCase.steps)) {
-        testCase.steps = testCase.steps.map((s: any, idx: number) => ({
-          index: s.index ?? (idx + 1),
-          type: s.type,
-          url: s.url,
-          description: s.description || (s.type === "navigate" ? (s.url || "/") : ""),
-        }));
+        testCase.steps = testCase.steps.map((s: any, idx: number) => {
+          if (typeof s === "object" && s !== null) {
+            let stepType = s.type;
+            let stepUrl = s.url;
+            let stepDesc = s.description;
+
+            if (!stepType) {
+              if (s.navigate !== undefined) {
+                stepType = "navigate";
+                stepUrl = s.navigate;
+                stepDesc = typeof s.navigate === "string" ? s.navigate : "/";
+              } else if (s.act !== undefined) {
+                stepType = "act";
+                stepDesc = s.act;
+              } else if (s.validate !== undefined) {
+                stepType = "validate";
+                stepDesc = s.validate;
+              }
+            }
+
+            return {
+              index: s.index ?? (idx + 1),
+              type: stepType,
+              url: stepUrl,
+              description: stepDesc || (stepType === "navigate" ? (stepUrl || "/") : ""),
+            };
+          }
+          return s;
+        });
         testCases.push(testCase);
       }
     } catch (err: any) {
