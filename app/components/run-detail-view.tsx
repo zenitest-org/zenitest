@@ -447,22 +447,22 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
               <table className="w-full text-xs text-left">
                 <thead className="bg-muted/40 text-[11px] font-semibold text-muted-foreground uppercase border-b border-border/40">
                   <tr>
-                    <th className="py-2 px-3">Method</th>
-                    <th className="py-2 px-3">URL</th>
-                    <th className="py-2 px-3">Status</th>
-                    <th className="py-2 px-3 text-right">Time</th>
+                    <th className="py-2 px-5">Method</th>
+                    <th className="py-2 px-5">URL</th>
+                    <th className="py-2 px-5">Status</th>
+                    <th className="py-2 px-5 text-right">Time</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/30">
                   {tc.network.map((req) => (
                     <tr key={req.id} className="hover:bg-muted/20">
-                      <td className="py-2 px-3 font-mono font-semibold text-[11px]">
+                      <td className="py-2 px-5 font-mono font-semibold text-[11px]">
                         {req.method}
                       </td>
-                      <td className="py-2 px-3 font-mono text-muted-foreground truncate max-w-[180px]">
+                      <td className="py-2 px-5 font-mono text-muted-foreground truncate max-w-[180px]">
                         {req.url}
                       </td>
-                      <td className="py-2 px-3">
+                      <td className="py-2 px-5">
                         <Badge
                           variant="outline"
                           className={cn(
@@ -475,7 +475,7 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
                           {req.status}
                         </Badge>
                       </td>
-                      <td className="py-2 px-3 text-right font-mono text-muted-foreground">
+                      <td className="py-2 px-5 text-right font-mono text-muted-foreground">
                         {req.time}
                       </td>
                     </tr>
@@ -487,7 +487,7 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
 
           {/* Logs Tab */}
           <TabsContent value="logs" className="mt-0">
-            <div className="bg-background p-2 font-mono text-xs space-y-1.5 max-h-[260px] overflow-y-auto">
+            <div className="bg-background py-3 px-5 font-mono text-xs space-y-1.5 max-h-[260px] overflow-y-auto">
               {tc.logs.map((log) => (
                 <div key={log.id} className="flex gap-2 font-mono">
                   <span className="text-muted-foreground shrink-0">
@@ -512,31 +512,31 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
           {/* Info Tab */}
           <TabsContent value="info" className="mt-0">
             <div className="bg-background px-2 text-xs divide-y divide-border/30">
-              <div className="flex justify-between p-2">
+              <div className="flex justify-between p-3">
                 <span className="text-muted-foreground">Spec File:</span>
                 <span className="font-mono font-medium text-foreground">
                   {tc.info.specFile}
                 </span>
               </div>
-              <div className="flex justify-between p-2">
+              <div className="flex justify-between p-3">
                 <span className="text-muted-foreground">Browser:</span>
                 <span className="font-medium text-foreground">
                   {tc.info.browser}
                 </span>
               </div>
-              <div className="flex justify-between p-2">
+              <div className="flex justify-between p-3">
                 <span className="text-muted-foreground">Duration:</span>
                 <span className="font-mono font-medium text-foreground">
                   {tc.info.duration}
                 </span>
               </div>
-              <div className="flex justify-between p-2">
+              <div className="flex justify-between p-3">
                 <span className="text-muted-foreground">Retries:</span>
                 <span className="font-mono font-medium text-foreground">
                   {tc.info.retries}
                 </span>
               </div>
-              <div className="flex justify-between p-2">
+              <div className="flex justify-between p-3">
                 <span className="text-muted-foreground">Environment:</span>
                 <span className="font-medium text-foreground">
                   {tc.info.environment}
@@ -549,7 +549,7 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
         {/* Right Content Area */}
         <div className="lg:col-span-3 flex flex-col justify-center">
           {currentShot ? (
-            <div className="relative flex-1 min-h-[220px] w-full  bg-muted/20  border-border/30 flex flex-col items-center justify-center p-6 text-center select-none">
+            <div className="relative flex-1 min-h-[300px] w-full  bg-muted/20  border-border/30 flex flex-col items-center justify-center p-6 text-center select-none">
               <div className="size-10 rounded-full bg-background flex items-center justify-center mb-2.5 text-muted-foreground/80 border border-border/50 shadow-2xs">
                 <ImageIcon className="size-4" />
               </div>
@@ -561,7 +561,7 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
               </p>
             </div>
           ) : (
-            <div className="flex h-full min-h-[220px] items-center justify-center rounded-xl text-xs text-muted-foreground bg-muted/20">
+            <div className="flex h-full min-h-[300px] items-center justify-center rounded-xl text-xs text-muted-foreground bg-muted/20">
               No screenshots captured for this test case.
             </div>
           )}

@@ -2,13 +2,13 @@
 
 import { Suspense } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
-import { 
-	CheckCircle2Icon, 
-	XCircleIcon, 
-	RefreshCwIcon,
-	PlayCircleIcon,
-	SearchIcon,
-	ChevronDownIcon
+import {
+  CheckCircle2Icon,
+  XCircleIcon,
+  RefreshCwIcon,
+  PlayCircleIcon,
+  SearchIcon,
+  ChevronDownIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -17,61 +17,61 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 type RunStatus = "passed" | "failed" | "running";
 
 interface RunItem {
-	id: string;
-	suite: string;
-	status: RunStatus;
-	tests: { passed: number; total: number };
-	duration: string;
-	timestamp: string;
-	triggeredBy: string;
+  id: string;
+  suite: string;
+  status: RunStatus;
+  tests: { passed: number; total: number };
+  duration: string;
+  timestamp: string;
+  triggeredBy: string;
 }
 
 const mockRuns: RunItem[] = [
-	{
-		id: "run-9842",
-		suite: "E2E Checkout Flow",
-		status: "passed",
-		tests: { passed: 42, total: 42 },
-		duration: "1m 14s",
-		timestamp: "2 mins ago",
-		triggeredBy: "GitHub Action (#412)",
-	},
-	{
-		id: "run-9841",
-		suite: "Auth & Session Verification",
-		status: "running",
-		tests: { passed: 18, total: 24 },
-		duration: "45s",
-		timestamp: "In progress",
-		triggeredBy: "Shaban Haider",
-	},
-	{
-		id: "run-9840",
-		suite: "Payment Gateway Integration",
-		status: "failed",
-		tests: { passed: 11, total: 14 },
-		duration: "2m 05s",
-		timestamp: "1 hour ago",
-		triggeredBy: "CLI Runner",
-	},
-	{
-		id: "run-9839",
-		suite: "Dashboard Layout & Components",
-		status: "passed",
-		tests: { passed: 88, total: 88 },
-		duration: "48s",
-		timestamp: "3 hours ago",
-		triggeredBy: "GitHub Action (#411)",
-	},
-	{
-		id: "run-9838",
-		suite: "User Permissions & Roles",
-		status: "passed",
-		tests: { passed: 31, total: 31 },
-		duration: "1m 02s",
-		timestamp: "5 hours ago",
-		triggeredBy: "Shaban Haider",
-	},
+  {
+    id: "run-9842",
+    suite: "E2E Checkout Flow",
+    status: "passed",
+    tests: { passed: 42, total: 42 },
+    duration: "1m 14s",
+    timestamp: "2 mins ago",
+    triggeredBy: "GitHub Action (#412)",
+  },
+  {
+    id: "run-9841",
+    suite: "Auth & Session Verification",
+    status: "running",
+    tests: { passed: 18, total: 24 },
+    duration: "45s",
+    timestamp: "In progress",
+    triggeredBy: "Shaban Haider",
+  },
+  {
+    id: "run-9840",
+    suite: "Payment Gateway Integration",
+    status: "failed",
+    tests: { passed: 11, total: 14 },
+    duration: "2m 05s",
+    timestamp: "1 hour ago",
+    triggeredBy: "CLI Runner",
+  },
+  {
+    id: "run-9839",
+    suite: "Dashboard Layout & Components",
+    status: "passed",
+    tests: { passed: 88, total: 88 },
+    duration: "48s",
+    timestamp: "3 hours ago",
+    triggeredBy: "GitHub Action (#411)",
+  },
+  {
+    id: "run-9838",
+    suite: "User Permissions & Roles",
+    status: "passed",
+    tests: { passed: 31, total: 31 },
+    duration: "1m 02s",
+    timestamp: "5 hours ago",
+    triggeredBy: "Shaban Haider",
+  },
 ];
 
 function RunsTable() {
@@ -139,7 +139,10 @@ function RunsTable() {
             <tbody className="divide-y">
               {filteredRuns.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">
+                  <td
+                    colSpan={5}
+                    className="px-6 py-8 text-center text-muted-foreground"
+                  >
                     No test runs found.
                   </td>
                 </tr>
@@ -152,7 +155,6 @@ function RunsTable() {
                   >
                     <td className="px-6 py-4 font-medium text-foreground">
                       <div className="flex items-center gap-2">
-                        <PlayCircleIcon className="size-4 text-muted-foreground shrink-0" />
                         <span className="font-mono text-xs">{run.id}</span>
                       </div>
                     </td>
@@ -192,7 +194,10 @@ function RunsTable() {
                       {run.duration}
                     </td>
                     <td className="px-6 py-4 text-muted-foreground text-xs">
-                      <Badge variant="secondary" className="font-normal text-[11px]">
+                      <Badge
+                        variant="secondary"
+                        className="font-normal text-[11px]"
+                      >
                         {run.timestamp}
                       </Badge>
                     </td>
