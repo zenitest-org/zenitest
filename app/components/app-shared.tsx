@@ -7,6 +7,7 @@ export type SidebarNavItem = {
   path?: string;
   icon?: ReactNode;
   isActive?: boolean;
+  isModal?: boolean;
   subItems?: SidebarNavItem[];
 };
 
@@ -19,13 +20,13 @@ export const navGroups: SidebarNavGroup[] = [
   {
     items: [
       {
-        title: "Test Runs",
+        title: "Runs",
         path: "/runs",
         icon: <HugeiconsIcon icon={Clock02Icon} strokeWidth={2.2} />,
       },
       {
         title: "API Key",
-        path: "/api-key",
+        isModal: true,
         icon: <HugeiconsIcon icon={Key01Icon} strokeWidth={2.2} />,
       },
     ],

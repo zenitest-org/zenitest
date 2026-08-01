@@ -1,251 +1,126 @@
 "use client";
 
 import { useState } from "react";
-import { 
-	KeyIcon, 
-	PlusIcon, 
-	CopyIcon, 
-	CheckIcon, 
-	Trash2Icon, 
-	ShieldAlertIcon,
-	EyeIcon,
-	EyeOffIcon
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-
-interface ApiKeyItem {
-	id: string;
-	name: string;
-	keyPrefix: string;
-	created: string;
-	lastUsed: string;
-}
-
-const mockKeys: ApiKeyItem[] = [
-	{
-		id: "key-1",
-		name: "CI/CD Pipeline Key",
-		keyPrefix: "zenitest_live_8f3a9b...",
-		created: "Jul 12, 2026",
-		lastUsed: "2 mins ago",
-	},
-	{
-		id: "key-2",
-		name: "Local CLI Development",
-		keyPrefix: "zenitest_live_2k7x1c...",
-		created: "May 28, 2026",
-		lastUsed: "Yesterday",
-	},
-	{
-		id: "key-3",
-		name: "Staging Test Runner",
-		keyPrefix: "zenitest_live_9p4v7e...",
-		created: "Jan 15, 2026",
-		lastUsed: "3 days ago",
-	},
-];
+import { CopyIcon, CheckIcon, ArrowRightIcon } from "lucide-react";
 
 export function ApiKeyView() {
-	const [keys, setKeys] = useState<ApiKeyItem[]>(mockKeys);
-	const [copiedId, setCopiedId] = useState<string | null>(null);
-	const [newKeyName, setNewKeyName] = useState("");
-	const [isCreating, setIsCreating] = useState(false);
-	const [generatedSecret, setGeneratedSecret] = useState<string | null>(null);
+	const [apiKey] = useState("zenitest_live_8f3a9b7c1d2e4f5a6b7c8d9e");
+	const [copiedKey, setCopiedKey] = useState(false);
+	const [copiedCmd, setCopiedCmd] = useState(false);
+	const [toastMsg, setToastMsg] = useState<string | null>(null);
 
-	const handleCopy = (id: string, text: string) => {
-		navigator.clipboard.writeText(text);
-		setCopiedId(id);
-		setTimeout(() => setCopiedId(null), 2000);
+	const showToast = (msg: string) => {
+		setToastMsg(msg);
+		setTimeout(() => setToastMsg(null), 2500);
 	};
 
-	const handleCreateKey = () => {
-		if (!newKeyName.trim()) return;
-
-		const randomId = `key-${Date.now()}`;
-		const fullSecret = `zenitest_live_${Math.random().toString(36).substring(2, 12)}${Math.random().toString(36).substring(2, 12)}`;
-		const newKey: ApiKeyItem = {
-			id: randomId,
-			name: newKeyName.trim(),
-			keyPrefix: `${fullSecret.substring(0, 16)}...`,
-			created: "Just now",
-			lastUsed: "Never",
-		};
-
-		setKeys([newKey, ...keys]);
-		setGeneratedSecret(fullSecret);
-		setNewKeyName("");
+	const handleCopyKey = () => {
+		navigator.clipboard.writeText(apiKey);
+		setCopiedKey(true);
+		showToast("API key copied");
+		setTimeout(() => setCopiedKey(false), 2000);
 	};
 
-	const handleRevoke = (id: string) => {
-		setKeys(keys.filter((k) => k.id !== id));
+	const handleCopyCmd = () => {
+		navigator.clipboard.writeText(`zenitest auth ${apiKey}`);
+		setCopiedCmd(true);
+		showToast("Command copied");
+		setTimeout(() => setCopiedCmd(false), 2000);
 	};
+
+	const displayKey = `${apiKey.substring(0, 18)}...`;
+	const displayCmd = `zenitest auth ${apiKey.substring(0, 18)}...`;
 
 	return (
-		<div className="space-y-6 max-w-5xl">
-			{/* Header Subtitle */}
-			<div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-				<p className="text-sm text-muted-foreground">
-					Manage security credentials for the ZeniTest CLI and API integrations
+		<div className="w-full space-y-4">
+			{/* Top Context & Explanation */}
+			<div className="space-y-1.5">
+				<p className="text-xs text-muted-foreground leading-relaxed">
+					Use this key to authenticate requests to the Zenitest API. Keep it secret and do not expose it in frontend applications.
 				</p>
-				<Button onClick={() => setIsCreating(true)} className="gap-2 shrink-0">
-					<PlusIcon className="size-4" />
-					Create New API Key
-				</Button>
+				<a
+					href="https://docs.zenitest.com"
+					target="_blank"
+					rel="noreferrer"
+					className="inline-flex items-center gap-1 text-xs font-medium text-foreground hover:underline"
+				>
+					View Docs <ArrowRightIcon className="size-3" />
+				</a>
 			</div>
 
-			{/* Security Callout Notice */}
-			<div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50/50 p-4 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-300">
-				<ShieldAlertIcon className="size-5 shrink-0 text-amber-600 dark:text-amber-400 mt-0.5" />
-				<div className="text-xs leading-relaxed">
-					<p className="font-semibold text-sm">Security Policy</p>
-					<p className="mt-0.5">
-						API keys grant full access to run test suites and manage test artifacts. Do not share your keys or commit them into public source control repositories.
-					</p>
+			{/* API Key Box */}
+			<div className="space-y-1.5">
+				<div className="flex items-center justify-between text-xs">
+					<span className="font-medium text-muted-foreground">API Key</span>
+					<button
+						type="button"
+						onClick={handleCopyKey}
+						className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors px-1.5 py-0.5 rounded hover:bg-muted cursor-pointer"
+					>
+						{copiedKey ? (
+							<>
+								<CheckIcon className="size-3 text-emerald-600 dark:text-emerald-400" />
+								<span className="text-emerald-600 dark:text-emerald-400 font-medium">Copied</span>
+							</>
+						) : (
+							<>
+								<CopyIcon className="size-3" />
+								<span>Copy</span>
+							</>
+						)}
+					</button>
+				</div>
+				<div className="rounded-md border border-zinc-200/80 dark:border-zinc-800 bg-[#f8f8f8] dark:bg-zinc-900/60 px-3 py-2 font-mono text-xs text-foreground break-all">
+					{displayKey}
 				</div>
 			</div>
 
-			{/* Create New Key Panel */}
-			{isCreating && (
-				<Card className="border-primary/30 shadow-md">
-					<CardHeader>
-						<CardTitle className="text-lg">Generate New Secret Key</CardTitle>
-						<CardDescription>
-							Enter a descriptive label to identify where this API key will be used.
-						</CardDescription>
-					</CardHeader>
-					<CardContent className="space-y-4">
-						{generatedSecret ? (
-							<div className="space-y-3">
-								<div className="p-3 bg-emerald-50 border border-emerald-200 rounded-md text-emerald-900 dark:bg-emerald-950/40 dark:border-emerald-800 dark:text-emerald-300 text-xs">
-									<p className="font-semibold text-sm mb-1">Key Generated Successfully!</p>
-									Please copy your API key now. You will not be able to see it again.
-								</div>
-
-								<div className="flex items-center gap-2">
-									<Input
-										readOnly
-										value={generatedSecret}
-										className="font-mono text-xs bg-muted"
-									/>
-									<Button
-										onClick={() => handleCopy("new-secret", generatedSecret)}
-										className="shrink-0 gap-1.5"
-									>
-										{copiedId === "new-secret" ? (
-											<>
-												<CheckIcon className="size-4" /> Copied
-											</>
-										) : (
-											<>
-												<CopyIcon className="size-4" /> Copy
-											</>
-										)}
-									</Button>
-								</div>
-
-								<div className="flex justify-end pt-2">
-									<Button
-										variant="outline"
-										onClick={() => {
-											setIsCreating(false);
-											setGeneratedSecret(null);
-										}}
-									>
-										Done
-									</Button>
-								</div>
-							</div>
+			{/* Quick Start Section */}
+			<div className="space-y-2 pt-3 border-t border-border">
+				<div>
+					<h4 className="text-xs font-semibold text-foreground">Quick Start</h4>
+					<p className="text-xs text-muted-foreground mt-0.5">
+						Authenticate the CLI with your API key.
+					</p>
+				</div>
+				<div className="rounded-md border border-zinc-200/80 dark:border-zinc-800 bg-[#f8f8f8] dark:bg-zinc-900/60 px-3 py-2 flex items-center justify-between gap-3">
+					<code className="font-mono text-xs text-foreground truncate">
+						{displayCmd}
+					</code>
+					<button
+						type="button"
+						onClick={handleCopyCmd}
+						className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground shrink-0 px-2 py-1 rounded hover:bg-zinc-200/60 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+					>
+						{copiedCmd ? (
+							<>
+								<CheckIcon className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+								<span className="text-emerald-600 dark:text-emerald-400 font-medium">Copied</span>
+							</>
 						) : (
-							<div className="flex flex-col sm:flex-row gap-3">
-								<Input
-									placeholder="e.g. GitHub Actions Production Runner"
-									value={newKeyName}
-									onChange={(e) => setNewKeyName(e.target.value)}
-									className="flex-1"
-								/>
-								<div className="flex gap-2">
-									<Button onClick={handleCreateKey} disabled={!newKeyName.trim()}>
-										Generate Key
-									</Button>
-									<Button variant="ghost" onClick={() => setIsCreating(false)}>
-										Cancel
-									</Button>
-								</div>
-							</div>
+							<>
+								<CopyIcon className="size-3.5" />
+								<span>Copy Command</span>
+							</>
 						)}
-					</CardContent>
-				</Card>
-			)}
+					</button>
+				</div>
+			</div>
 
-			{/* API Keys Table */}
-			<Card>
-				<CardHeader className="pb-3">
-					<CardTitle className="text-lg">Active Keys</CardTitle>
-					<CardDescription>
-						All active API keys associated with your organization
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="p-0">
-					<div className="relative w-full overflow-auto">
-						<table className="w-full text-sm text-left">
-							<thead className="bg-muted/50 text-xs uppercase text-muted-foreground border-y">
-								<tr>
-									<th className="px-6 py-3 font-semibold">Key Name</th>
-									<th className="px-6 py-3 font-semibold">Prefix</th>
-									<th className="px-6 py-3 font-semibold">Created</th>
-									<th className="px-6 py-3 font-semibold">Last Used</th>
-									<th className="px-6 py-3 font-semibold text-right">Action</th>
-								</tr>
-							</thead>
-							<tbody className="divide-y">
-								{keys.length === 0 ? (
-									<tr>
-										<td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">
-											No API keys found. Create one to get started.
-										</td>
-									</tr>
-								) : (
-									keys.map((keyItem) => (
-										<tr key={keyItem.id} className="hover:bg-muted/40 transition-colors">
-											<td className="px-6 py-4 font-medium text-foreground">
-												<div className="flex items-center gap-2">
-													<KeyIcon className="size-4 text-muted-foreground shrink-0" />
-													<span>{keyItem.name}</span>
-												</div>
-											</td>
-											<td className="px-6 py-4 font-mono text-xs text-muted-foreground">
-												{keyItem.keyPrefix}
-											</td>
-											<td className="px-6 py-4 text-muted-foreground text-xs">
-												{keyItem.created}
-											</td>
-											<td className="px-6 py-4 text-muted-foreground text-xs">
-												<Badge variant="secondary" className="font-normal text-[11px]">
-													{keyItem.lastUsed}
-												</Badge>
-											</td>
-											<td className="px-6 py-4 text-right">
-												<Button
-													variant="ghost"
-													size="sm"
-													onClick={() => handleRevoke(keyItem.id)}
-													className="text-destructive hover:text-destructive hover:bg-destructive/10 gap-1.5 h-8 text-xs"
-												>
-													<Trash2Icon className="size-3.5" />
-													Revoke
-												</Button>
-											</td>
-										</tr>
-									))
-								)}
-							</tbody>
-						</table>
-					</div>
-				</CardContent>
-			</Card>
+			{/* Green Toast Notification */}
+			{toastMsg && (
+				<div className="flex items-center gap-2 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-800 rounded-md px-3 py-2 font-medium animate-in fade-in slide-in-from-bottom-1 duration-150">
+					<CheckIcon className="size-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+					<span>{toastMsg}</span>
+				</div>
+			)}
 		</div>
 	);
 }
+
+
+
+
+
+
+

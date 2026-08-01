@@ -3,13 +3,13 @@ import { AppHeader } from "@/components/app-header";
 import { AppSidebar } from "@/components/app-sidebar";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
-	return (
-		<SidebarProvider defaultOpen={false}>
-			<AppSidebar />
-			<SidebarInset className="px-4 py-3.5 md:px-6 md:py-4.5">
-				<AppHeader />
-				<div className="flex flex-1 flex-col gap-4">{children}</div>
-			</SidebarInset>
-		</SidebarProvider>
-	);
+  return (
+    <SidebarProvider defaultOpen={false}>
+      <AppSidebar />
+      <SidebarInset className="px-4 py-3.5 md:px-10 md:py-4.5">
+        <AppHeader />
+        <div className="flex flex-1 flex-col gap-4">{children}</div>
+      </SidebarInset>
+    </SidebarProvider>
+  );
 }
