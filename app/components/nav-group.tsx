@@ -23,15 +23,14 @@ import {
 	DialogContent,
 	DialogHeader,
 	DialogTitle,
-	DialogDescription,
 } from "@/components/ui/dialog";
-import { ApiKeyView } from "@/components/api-key-view";
+import { SettingsView } from "@/components/settings-view";
 import type { SidebarNavGroup } from "@/components/app-shared";
 import { ChevronRightIcon } from "lucide-react";
 
 export function NavGroup({ label, items }: SidebarNavGroup) {
 	const pathname = usePathname();
-	const [apiKeyModalOpen, setApiKeyModalOpen] = useState(false);
+	const [settingsModalOpen, setSettingsModalOpen] = useState(false);
 
 	return (
 		<>
@@ -46,7 +45,7 @@ export function NavGroup({ label, items }: SidebarNavGroup) {
 								<SidebarMenuItem key={item.title}>
 									<SidebarMenuButton
 										tooltip={item.title}
-										onClick={() => setApiKeyModalOpen(true)}
+										onClick={() => setSettingsModalOpen(true)}
 									>
 										{item.icon}
 										<span>{item.title}</span>
@@ -79,17 +78,16 @@ export function NavGroup({ label, items }: SidebarNavGroup) {
 				</SidebarMenu>
 			</SidebarGroup>
 
-			<Dialog open={apiKeyModalOpen} onOpenChange={setApiKeyModalOpen}>
-				<DialogContent className="sm:max-w-[480px]">
+			<Dialog open={settingsModalOpen} onOpenChange={setSettingsModalOpen}>
+				<DialogContent className="sm:max-w-[620px] max-h-[85vh] overflow-y-auto">
 					<DialogHeader>
-						<DialogTitle>API Key</DialogTitle>
+						<DialogTitle>Settings</DialogTitle>
 					</DialogHeader>
-					<div className="py-1">
-						<ApiKeyView />
+					<div className="py-2">
+						<SettingsView />
 					</div>
 				</DialogContent>
 			</Dialog>
 		</>
 	);
 }
-

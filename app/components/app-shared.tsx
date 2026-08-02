@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Clock02Icon, Key01Icon } from "@hugeicons/core-free-icons";
+import { Clock02Icon, Settings01Icon } from "@hugeicons/core-free-icons";
 
 export type SidebarNavItem = {
   title: string;
@@ -25,9 +25,9 @@ export const navGroups: SidebarNavGroup[] = [
         icon: <HugeiconsIcon icon={Clock02Icon} strokeWidth={2.2} />,
       },
       {
-        title: "API Key",
+        title: "Settings",
         isModal: true,
-        icon: <HugeiconsIcon icon={Key01Icon} strokeWidth={2.2} />,
+        icon: <HugeiconsIcon icon={Settings01Icon} strokeWidth={2.2} />,
       },
     ],
   },
