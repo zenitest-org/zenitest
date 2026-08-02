@@ -99,14 +99,14 @@ function RunsTable() {
 
   return (
     <Card className="py-0 gap-0">
-      <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3">
+      <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-2">
         <div className="relative w-full sm:w-72">
           <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
           <Input
             placeholder="Search test suite or run ID..."
             value={searchQuery}
             onChange={(e) => updateParams(e.target.value, statusFilter)}
-            className="pl-8 h-8 text-xs border-zinc-200 dark:border-zinc-800"
+            className="pl-8 h-8 text-xs border-none shadow-none bg-transparent dark:bg-transparent focus-visible:ring-0 focus-visible:border-none focus:outline-none"
           />
         </div>
 
@@ -114,7 +114,7 @@ function RunsTable() {
           <select
             value={statusFilter}
             onChange={(e) => updateParams(searchQuery, e.target.value)}
-            className="h-8 rounded-md border border-zinc-200 dark:border-zinc-800 bg-background px-3 py-1 pr-8 text-xs font-medium text-foreground cursor-pointer focus:outline-none focus:ring-1 focus:ring-ring appearance-none"
+            className="h-8 rounded-md border-none bg-background px-3 py-1 pr-8 text-xs font-medium text-foreground cursor-pointer focus:outline-none focus:ring-0 appearance-none shadow-none"
           >
             <option value="all">All Status</option>
             <option value="passed">Passed</option>

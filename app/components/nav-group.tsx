@@ -39,7 +39,7 @@ export function NavGroup({ label, items }: SidebarNavGroup) {
 				{label && <SidebarGroupLabel>{label}</SidebarGroupLabel>}
 				<SidebarMenu>
 					{items.map((item) => {
-						const isActive = !item.isModal && (item.path === pathname || (item.path === "/runs" && (pathname === "/" || pathname === "/runs")));
+						const isActive = !item.isModal && (item.path === pathname || (item.path === "/runs" && (pathname === "/" || pathname.startsWith("/runs"))));
 
 						if (item.isModal) {
 							return (

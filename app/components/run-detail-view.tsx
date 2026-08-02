@@ -165,8 +165,9 @@ const mockTestCases: TestCaseData[] = [
     screenshots: [
       { id: "sc1", title: "Step 1: Login Page Loaded" },
       { id: "sc2", title: "Step 2: Credentials Entered" },
-      { id: "sc3", title: "Step 4: Redirected to Dashboard" },
-      { id: "sc4", title: "Step 5: Profile Banner Verified" },
+      { id: "sc3", title: "Step 3: Sign In Clicked" },
+      { id: "sc4", title: "Step 4: Redirected to Dashboard" },
+      { id: "sc5", title: "Step 5: Profile Banner Verified" },
     ],
   },
   {
@@ -237,8 +238,10 @@ const mockTestCases: TestCaseData[] = [
       environment: "Staging (Node v20.11.0)",
     },
     screenshots: [
-      { id: "sc21", title: "Cart Summary View" },
-      { id: "sc22", title: "Coupon Applied Screen" },
+      { id: "sc21", title: "Step 1: Shopping Cart Page Loaded" },
+      { id: "sc22", title: "Step 2: Coupon SUMMER2026 Entered" },
+      { id: "sc23", title: "Step 3: Apply Coupon Clicked" },
+      { id: "sc24", title: "Step 4: 20% Discount Deduction Verified" },
     ],
   },
   {
@@ -308,8 +311,10 @@ const mockTestCases: TestCaseData[] = [
       environment: "Staging (Node v20.11.0)",
     },
     screenshots: [
-      { id: "sc31", title: "Payment Form State" },
-      { id: "sc32", title: "Card Declined Error Modal" },
+      { id: "sc31", title: "Step 1: Payment Page Loaded" },
+      { id: "sc32", title: "Step 2: Declined Card Info Entered" },
+      { id: "sc33", title: "Step 3: Complete Order Clicked" },
+      { id: "sc34", title: "Step 4: Card Declined Error Modal Shown" },
     ],
   },
 ];
@@ -427,7 +432,8 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
             {tc.steps.map((step, idx) => (
               <div
                 key={step.id}
-                className="flex items-center justify-between gap-3 px-2 py-2  hover:bg-muted/40 transition-colors"
+                onClick={() => setScreenshotIndex(idx)}
+                className="flex items-center justify-between gap-3 px-2 py-2 hover:bg-muted/40 transition-colors cursor-pointer"
               >
                 <div className="flex items-center gap-3 min-w-0">
                   <span className="text-[11px] font-mono text-muted-foreground/60 w-5 shrink-0 text-right">
