@@ -12,7 +12,7 @@ export class ZeniServer {
   private clients = new Map<string, WebSocket>();
   private browsers = new Map<string, WebSocket>();
 
-  constructor(port = 3000) {
+  constructor(port = Number(process.env.PORT) || 3001) {
     this.port = port;
     this.app = new Hono();
 
@@ -179,7 +179,7 @@ export class ZeniServer {
 
 // Auto-run if executed directly
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const port = Number(process.env.PORT) || 3000;
+  const port = Number(process.env.PORT) || 3001;
   const server = new ZeniServer(port);
   server.start().catch((err) => console.error(err));
 }

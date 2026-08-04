@@ -170,9 +170,12 @@ function parseArgs(args: string[]) {
   return options;
 }
 
+const API_BASE_URL = process.env.ZENITEST_API_URL || process.env.API_URL || "http://localhost:3001";
+const WS_BASE_URL = process.env.ZENITEST_WS_URL || process.env.WS_URL || "ws://localhost:3001";
+
 async function verifyApiKey(apiKey: string): Promise<{ valid: boolean; user?: any }> {
   try {
-    const response = await fetch("http://localhost:3000/api/auth/verify", {
+    const response = await fetch(`${API_BASE_URL}/api/auth/verify`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -275,7 +278,7 @@ async function runAuth(options: Record<string, any>) {
 
 async function fetchServerClientId(apiKey: string): Promise<string> {
   try {
-    const res = await fetch("http://localhost:3000/api/executions/session", {
+    const res = await fetch(`${API_BASE_URL}/api/executions/session`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -297,7 +300,7 @@ async function fetchServerClientId(apiKey: string): Promise<string> {
 async function runClient() {
   const apiKey = await getApiKey();
   const clientId = await fetchServerClientId(apiKey);
-  const wsServerUrl = "ws://localhost:3000";
+  const wsServerUrl = WS_BASE_URL;
   const chromePort = 9222;
   const headless = true;
 
@@ -320,7 +323,7 @@ async function runClient() {
 }
 
 async function runTestCase(testCase: any, apiKey: string) {
-  const targetApiUrl = "http://localhost:3000/api/executions/create";
+  const targetApiUrl = `${API_BASE_URL}/api/executions/create`;
   const clientId = await fetchServerClientId(apiKey);
 
   const response = await fetch(targetApiUrl, {
@@ -580,7 +583,7 @@ async function runTests(options: Record<string, any>) {
 
   const secrets = loadLocalSecrets(dirPath);
   const client = new ZeniProxyClient({
-    serverUrl: "ws://localhost:3000",
+    serverUrl: WS_BASE_URL,
     clientId,
     chromePort: 9222,
     headless: true,
@@ -598,7 +601,7 @@ async function runTests(options: Record<string, any>) {
 
     const parallel = Number(options.parallel || options.p || options.concurrency || options.c || 5);
 
-    const response = await fetch("http://localhost:3000/api/executions/create", {
+    const response = await fetch(`${API_BASE_URL}/api/executions/create`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

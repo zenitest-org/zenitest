@@ -1,11 +1,31 @@
 import { Context, Next } from "hono";
+import { createClerkClient, verifyToken } from "@clerk/backend";
 import { supabase } from "../db/supabase";
+import crypto from "crypto";
 
 export interface AuthUser {
   id: string;
   email: string;
   name: string;
   api_key: string;
+}
+
+const secretKey = process.env.CLERK_SECRET_KEY;
+const publishableKey = process.env.CLERK_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+
+const clerkClient = createClerkClient({
+  secretKey,
+  publishableKey,
+});
+
+function generateApiKey(): string {
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  const bytes = crypto.randomBytes(32);
+  let result = "zt-";
+  for (let i = 0; i < 32; i++) {
+    result += chars[bytes[i] % chars.length];
+  }
+  return result;
 }
 
 export async function authMiddleware(c: Context, next: Next) {
@@ -64,26 +84,79 @@ export async function authMiddleware(c: Context, next: Next) {
       }
     }
 
-    // Validate Access Token via Supabase Auth if API key failed or was not provided
+    // Validate Access Token via Clerk Auth if API key failed or was not provided
     if (!authenticatedUser && token) {
-      const { data, error: authError } = await supabase.auth.getUser(token);
-      if (!authError && data?.user) {
-        const { data: dbUser } = await supabase
-          .from("users")
-          .select("id, email, name, api_key")
-          .eq("id", data.user.id)
-          .single();
+      try {
+        const verifiedPayload = await verifyToken(token, {
+          secretKey,
+          publishableKey,
+          jwtKey: process.env.CLERK_JWT_KEY,
+        });
 
-        if (dbUser) {
-          authenticatedUser = dbUser;
-        } else {
-          authenticatedUser = {
-            id: data.user.id,
-            email: data.user.email || "",
-            name: data.user.user_metadata?.name || data.user.email || "User",
-            api_key: "",
-          };
+        const userId = verifiedPayload.sub;
+        if (userId) {
+          let email = (verifiedPayload as any).email || "";
+          let name = (verifiedPayload as any).name || "";
+
+          if (!email || !name) {
+            try {
+              const clerkUser = await clerkClient.users.getUser(userId);
+              email =
+                clerkUser.emailAddresses.find((e) => e.id === clerkUser.primaryEmailAddressId)?.emailAddress ||
+                clerkUser.emailAddresses[0]?.emailAddress ||
+                "";
+              name =
+                [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(" ") ||
+                clerkUser.username ||
+                email ||
+                "User";
+            } catch {
+              if (!name) name = email || "User";
+            }
+          }
+
+          // Search public.users table by email
+          let dbUser: AuthUser | null = null;
+          if (email) {
+            const { data } = await supabase
+              .from("users")
+              .select("id, email, name, api_key")
+              .eq("email", email)
+              .maybeSingle();
+            dbUser = data;
+          }
+
+          if (dbUser) {
+            authenticatedUser = dbUser;
+          } else {
+            const newApiKey = generateApiKey();
+            const { data: createdUser, error: insertErr } = await supabase
+              .from("users")
+              .insert({
+                email,
+                name,
+                api_key: newApiKey,
+              })
+              .select("id, email, name, api_key")
+              .single();
+
+            if (!insertErr && createdUser) {
+              authenticatedUser = createdUser;
+            } else {
+              if (insertErr) {
+                console.error("[Auth Middleware] Error creating user record in users table:", insertErr);
+              }
+              authenticatedUser = {
+                id: userId,
+                email,
+                name,
+                api_key: newApiKey,
+              };
+            }
+          }
         }
+      } catch (clerkErr) {
+        console.error("[Auth Middleware] Clerk token verification failed:", clerkErr);
       }
     }
 
@@ -91,7 +164,7 @@ export async function authMiddleware(c: Context, next: Next) {
       return c.json(
         {
           success: false,
-          error: "Unauthorized: Invalid or missing API key (x-api-key / Bearer zt-...) or Access Token",
+          error: "Unauthorized: Invalid or missing API key (x-api-key / Bearer zt-...) or Clerk Access Token",
         },
         401
       );

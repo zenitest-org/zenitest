@@ -10,6 +10,7 @@
   "scripts": {
     "dev": "turbo run dev",
     "dev:app": "bun --cwd app dev",
+    "dev:api": "bun --cwd api ",
     "build": "turbo run build",
     "server": "turbo run server",
     "client": "turbo run client",

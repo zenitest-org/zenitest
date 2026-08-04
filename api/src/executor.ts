@@ -486,6 +486,73 @@ export class Executor {
     let overallSuccess = true;
     let totalTokensUsed = 0;
 
+    const networkReports: any[] = [];
+    const logReports: any[] = [];
+
+    const getFormattedTime = () => {
+      const elapsed = Date.now() - startTime;
+      const sec = Math.floor(elapsed / 1000);
+      const ms = elapsed % 1000;
+      return `${String(sec).padStart(2, "0")}:${String(ms).padStart(3, "0")}`;
+    };
+
+    logReports.push({
+      id: `l-${logReports.length + 1}`,
+      timestamp: getFormattedTime(),
+      level: "info",
+      message: `Starting execution for test case "${testCase.title}" (${testCase.id})`,
+    });
+
+    page.on("response", (res: any) => {
+      try {
+        const req = res.request();
+        const urlStr = req.url();
+        if (urlStr.startsWith("http://") || urlStr.startsWith("https://")) {
+          const timing = req.timing();
+          const durationMs = timing && timing.responseEnd > 0 ? Math.round(timing.responseEnd) : 0;
+          const timeStr = durationMs > 0 ? `${durationMs}ms` : "—";
+
+          let displayUrl = urlStr;
+          try {
+            const parsed = new URL(urlStr);
+            displayUrl = parsed.pathname + parsed.search;
+          } catch (_) {}
+
+          networkReports.push({
+            id: `n-${networkReports.length + 1}`,
+            method: req.method(),
+            url: displayUrl,
+            status: res.status(),
+            time: timeStr,
+          });
+        }
+      } catch (_) {}
+    });
+
+    page.on("console", (msg: any) => {
+      try {
+        const type = msg.type();
+        const level = type === "error" ? "error" : type === "warning" || type === "warn" ? "warn" : "info";
+        logReports.push({
+          id: `l-${logReports.length + 1}`,
+          timestamp: getFormattedTime(),
+          level,
+          message: msg.text(),
+        });
+      } catch (_) {}
+    });
+
+    page.on("pageerror", (err: any) => {
+      try {
+        logReports.push({
+          id: `l-${logReports.length + 1}`,
+          timestamp: getFormattedTime(),
+          level: "error",
+          message: `Uncaught Exception: ${err.message || String(err)}`,
+        });
+      } catch (_) {}
+    });
+
     try {
       const normalizedSteps = (testCase.steps || []).map((s: any, idx: number) => {
         if (typeof s === "object" && s !== null) {
@@ -759,13 +826,24 @@ Set pageStillLoading to true if it failed ONLY because the page is still loading
       await page.close().catch(() => {});
     }
 
+    const totalExecutionTimeMs = Date.now() - startTime;
+    const info = {
+      specFile: testCase.id ? `${testCase.id}.yaml` : "test.yaml",
+      browser: "Chromium 124.0",
+      duration: `${(totalExecutionTimeMs / 1000).toFixed(1)}s`,
+      url: testCase.prodURL || testCase.localURL || "—",
+    };
+
     return {
       testCaseId: testCase.id,
       title: testCase.title,
       overallSuccess,
       targetURL: testCase.prodURL || testCase.localURL || "",
       stepReports,
-      totalExecutionTimeMs: Date.now() - startTime,
+      networkReports,
+      logReports,
+      info,
+      totalExecutionTimeMs,
       totalTokensUsed,
     };
   }

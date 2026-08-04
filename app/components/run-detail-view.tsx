@@ -1,17 +1,21 @@
 "use client";
 
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "@clerk/nextjs";
 import {
   CheckCircle2Icon,
   XCircleIcon,
+  CheckIcon,
+  XIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
   GlobeIcon,
   TerminalIcon,
   InfoIcon,
   LayersIcon,
-  ClockIcon,
   ImageIcon,
+  RefreshCwIcon,
 } from "lucide-react";
 import {
   Accordion,
@@ -30,6 +34,7 @@ export interface StepItem {
   id: string;
   description: string;
   type: StepType;
+  status?: "passed" | "failed";
 }
 
 export interface NetworkItem {
@@ -51,13 +56,13 @@ export interface TestCaseInfo {
   specFile: string;
   browser: string;
   duration: string;
-  retries: number;
-  environment: string;
+  url: string;
 }
 
 export interface ScreenshotItem {
   id: string;
   title: string;
+  url?: string;
 }
 
 export interface TestCaseData {
@@ -83,26 +88,31 @@ const mockTestCases: TestCaseData[] = [
         id: "s1",
         description: "Navigate to login page (/login)",
         type: "navigate",
+        status: "passed",
       },
       {
         id: "s2",
         description: "Fill email address and password input fields",
         type: "act",
+        status: "passed",
       },
       {
         id: "s3",
         description: "Click on 'Sign In' submit button",
         type: "act",
+        status: "passed",
       },
       {
         id: "s4",
         description: "Validate redirect response to /dashboard URL",
         type: "validate",
+        status: "passed",
       },
       {
         id: "s5",
         description: "Validate user profile greeting banner is visible",
         type: "validate",
+        status: "passed",
       },
     ],
     network: [
@@ -159,8 +169,7 @@ const mockTestCases: TestCaseData[] = [
       specFile: "tests/e2e/auth.spec.ts",
       browser: "Chromium 124.0",
       duration: "2.4s",
-      retries: 0,
-      environment: "Staging (Node v20.11.0)",
+      url: "http://localhost:3000/login",
     },
     screenshots: [
       { id: "sc1", title: "Step 1: Login Page Loaded" },
@@ -180,17 +189,25 @@ const mockTestCases: TestCaseData[] = [
         id: "s21",
         description: "Navigate to shopping cart page (/cart)",
         type: "navigate",
+        status: "passed",
       },
       {
         id: "s22",
         description: "Enter coupon code 'SUMMER2026' into promo field",
         type: "act",
+        status: "passed",
       },
-      { id: "s23", description: "Click 'Apply Coupon' button", type: "act" },
+      {
+        id: "s23",
+        description: "Click 'Apply Coupon' button",
+        type: "act",
+        status: "passed",
+      },
       {
         id: "s24",
         description: "Validate 20% discount subtotal deduction",
         type: "validate",
+        status: "passed",
       },
     ],
     network: [
@@ -234,8 +251,7 @@ const mockTestCases: TestCaseData[] = [
       specFile: "tests/e2e/checkout.spec.ts",
       browser: "Chromium 124.0",
       duration: "3.8s",
-      retries: 0,
-      environment: "Staging (Node v20.11.0)",
+      url: "http://localhost:3000/cart",
     },
     screenshots: [
       { id: "sc21", title: "Step 1: Shopping Cart Page Loaded" },
@@ -254,17 +270,25 @@ const mockTestCases: TestCaseData[] = [
         id: "s31",
         description: "Navigate to checkout payment step (/checkout/payment)",
         type: "navigate",
+        status: "passed",
       },
       {
         id: "s32",
         description: "Enter test declined card details (4000 0000 0000 0002)",
         type: "act",
+        status: "passed",
       },
-      { id: "s33", description: "Click 'Complete Order' button", type: "act" },
+      {
+        id: "s33",
+        description: "Click 'Complete Order' button",
+        type: "act",
+        status: "passed",
+      },
       {
         id: "s34",
         description: "Validate card declined error dialog is displayed",
         type: "validate",
+        status: "failed",
       },
     ],
     network: [
@@ -307,8 +331,7 @@ const mockTestCases: TestCaseData[] = [
       specFile: "tests/e2e/payment.spec.ts",
       browser: "Firefox 125.0",
       duration: "4.1s",
-      retries: 1,
-      environment: "Staging (Node v20.11.0)",
+      url: "http://localhost:3000/checkout/payment",
     },
     screenshots: [
       { id: "sc31", title: "Step 1: Payment Page Loaded" },
@@ -336,9 +359,10 @@ function StepTypeBadge({ type }: { type: StepType }) {
 }
 
 function TestCaseDetail({ tc }: { tc: TestCaseData }) {
-  const [screenshotIndex, setScreenshotIndex] = useState(0);
-
   const screenshots = tc.screenshots || [];
+  const [screenshotIndex, setScreenshotIndex] = useState(() =>
+    screenshots.length > 0 ? screenshots.length - 1 : 0,
+  );
   const currentShot = screenshots[screenshotIndex];
 
   const prevShot = () => setScreenshotIndex((i) => Math.max(0, i - 1));
@@ -390,14 +414,22 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-6 rounded-md hover:bg-muted text-muted-foreground/70 hover:text-foreground shrink-0"
+                className={cn(
+                  "size-6 rounded-md shrink-0 transition-colors",
+                  screenshotIndex === 0
+                    ? "text-muted-foreground/30 opacity-40 cursor-not-allowed"
+                    : "text-black dark:text-white hover:bg-muted cursor-pointer",
+                )}
                 onClick={prevShot}
                 disabled={screenshotIndex === 0}
                 title="Previous screenshot"
               >
-                <ChevronLeftIcon className="size-3" />
+                <ChevronLeftIcon className="size-3.5 stroke-[1.75]" />
               </Button>
-              <span className="text-[11px] text-muted-foreground truncate select-none px-1">
+              <span
+                className="w-64 sm:w-80 max-w-full text-[11px] text-muted-foreground truncate text-center select-none px-1 block"
+                title={`Screenshot ${screenshotIndex + 1}/${screenshots.length}: ${currentShot.title.replace(/^Step \d+:\s*/, "")}`}
+              >
                 <span className="font-mono text-muted-foreground/70 mr-1">
                   Screenshot {screenshotIndex + 1}/{screenshots.length}:
                 </span>
@@ -408,12 +440,17 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
               <Button
                 variant="ghost"
                 size="icon"
-                className="size-6 rounded-md hover:bg-muted text-muted-foreground/70 hover:text-foreground shrink-0"
+                className={cn(
+                  "size-6 rounded-md shrink-0 transition-colors",
+                  screenshotIndex >= screenshots.length - 1
+                    ? "text-muted-foreground/30 opacity-40 cursor-not-allowed"
+                    : "text-black dark:text-white hover:bg-muted cursor-pointer",
+                )}
                 onClick={nextShot}
                 disabled={screenshotIndex >= screenshots.length - 1}
                 title="Next screenshot"
               >
-                <ChevronRightIcon className="size-3" />
+                <ChevronRightIcon className="size-3.5 stroke-[1.75]" />
               </Button>
             </div>
           ) : (
@@ -425,20 +462,27 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
       </div>
 
       {/* Content Row */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 divide-y lg:divide-y-0 lg:divide-x divide-border/40">
+      <div className="grid grid-cols-1 lg:grid-cols-5 divide-y lg:divide-y-0 lg:divide-x divide-border/40 min-h-[350px]">
         {/* Left Content Area */}
-        <div className="lg:col-span-2 flex flex-col">
-          <TabsContent value="steps" className="mt-0 space-y-1">
+        <div className="lg:col-span-2 flex flex-col h-full min-h-0">
+          <TabsContent value="steps" className="mt-0 space-y-1 h-full flex-1 overflow-y-auto min-h-0 max-h-[500px]">
             {tc.steps.map((step, idx) => (
               <div
                 key={step.id}
                 onClick={() => setScreenshotIndex(idx)}
-                className="flex items-center justify-between gap-3 px-2 py-2 hover:bg-muted/40 transition-colors cursor-pointer"
+                className={cn(
+                  "flex items-center justify-between gap-3 px-5 py-2 transition-colors cursor-pointer",
+                  step.status === "failed"
+                    ? "bg-rose-500/5 dark:bg-rose-950/20 hover:bg-rose-500/10 dark:hover:bg-rose-950/30"
+                    : "hover:bg-muted/40",
+                )}
               >
-                <div className="flex items-center gap-3 min-w-0">
-                  <span className="text-[11px] font-mono text-muted-foreground/60 w-5 shrink-0 text-right">
-                    {idx + 1}
-                  </span>
+                <div className="flex items-center gap-2.5 min-w-0">
+                  {step.status === "failed" ? (
+                    <XIcon className="size-3.5 text-rose-600 dark:text-rose-400 shrink-0 stroke-[2.5]" />
+                  ) : (
+                    <CheckIcon className="size-3.5 text-emerald-600 dark:text-emerald-400 shrink-0 stroke-[2.5]" />
+                  )}
                   <span className="text-xs font-medium text-foreground/90 leading-relaxed truncate">
                     {step.description}
                   </span>
@@ -448,76 +492,88 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
             ))}
           </TabsContent>
 
-          <TabsContent value="network" className="mt-0">
-            <div className="bg-background overflow-hidden">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-muted/40 text-[11px] font-semibold text-muted-foreground uppercase border-b border-border/40">
-                  <tr>
-                    <th className="py-2 px-5">Method</th>
-                    <th className="py-2 px-5">URL</th>
-                    <th className="py-2 px-5">Status</th>
-                    <th className="py-2 px-5 text-right">Time</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/30">
-                  {tc.network.map((req) => (
-                    <tr key={req.id} className="hover:bg-muted/20">
-                      <td className="py-2 px-5 font-mono font-semibold text-[11px]">
-                        {req.method}
-                      </td>
-                      <td className="py-2 px-5 font-mono text-muted-foreground truncate max-w-[180px]">
-                        {req.url}
-                      </td>
-                      <td className="py-2 px-5">
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "font-mono text-[10px] px-1.5 py-0 rounded",
-                            req.status < 300
-                              ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20"
-                              : "text-rose-600 bg-rose-500/10 border-rose-500/20",
-                          )}
-                        >
-                          {req.status}
-                        </Badge>
-                      </td>
-                      <td className="py-2 px-5 text-right font-mono text-muted-foreground">
-                        {req.time}
-                      </td>
+          <TabsContent value="network" className="mt-0 h-full flex-1 flex flex-col min-h-0">
+            <div className="bg-background h-full flex-1 overflow-y-auto min-h-0 max-h-[500px]">
+              {tc.network.length === 0 ? (
+                <div className="py-8 text-center text-xs text-muted-foreground">
+                  No network requests recorded for this test.
+                </div>
+              ) : (
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead className="sticky top-0 z-10 bg-muted/50 border-b border-border/40">
+                    <tr className="text-[11px] font-semibold text-muted-foreground uppercase">
+                      <th className="py-2.5 px-4 bg-muted/50">Method</th>
+                      <th className="py-2.5 px-4 bg-muted/50">URL</th>
+                      <th className="py-2.5 px-4 bg-muted/50">Status</th>
+                      <th className="py-2.5 px-4 bg-muted/50 text-right">Time</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-border/30">
+                    {tc.network.map((req) => (
+                      <tr key={req.id} className="hover:bg-muted/20">
+                        <td className="py-2 px-4 font-mono font-semibold text-[11px]">
+                          {req.method}
+                        </td>
+                        <td className="py-2 px-4 font-mono text-muted-foreground truncate max-w-[150px] sm:max-w-[220px]" title={req.url}>
+                          {req.url}
+                        </td>
+                        <td className="py-2 px-4">
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "font-mono text-[10px] px-1.5 py-0 rounded",
+                              req.status < 300
+                                ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20"
+                                : "text-rose-600 bg-rose-500/10 border-rose-500/20",
+                            )}
+                          >
+                            {req.status}
+                          </Badge>
+                        </td>
+                        <td className="py-2 px-4 text-right font-mono text-muted-foreground">
+                          {req.time}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
           </TabsContent>
 
           {/* Logs Tab */}
-          <TabsContent value="logs" className="mt-0">
-            <div className="bg-background py-3 px-5 font-mono text-xs space-y-1.5 max-h-[260px] overflow-y-auto">
-              {tc.logs.map((log) => (
-                <div key={log.id} className="flex gap-2 font-mono">
-                  <span className="text-muted-foreground shrink-0">
-                    [{log.timestamp}]
-                  </span>
-                  <span
-                    className={cn(
-                      log.level === "error"
-                        ? "text-rose-600 dark:text-rose-400 font-semibold"
-                        : log.level === "warn"
-                          ? "text-amber-600 dark:text-amber-400 font-medium"
-                          : "text-foreground",
-                    )}
-                  >
-                    {log.message}
-                  </span>
-                </div>
-              ))}
-            </div>
+          <TabsContent value="logs" className="mt-0 h-full flex-1 flex flex-col min-h-0">
+            {tc.logs.length === 0 ? (
+              <div className="py-8 text-center text-xs text-muted-foreground font-mono">
+                No console logs recorded for this test.
+              </div>
+            ) : (
+              <div className="bg-background py-3 px-5 font-mono text-xs space-y-1.5 h-full flex-1 overflow-y-auto min-h-0 max-h-[500px]">
+                {tc.logs.map((log) => (
+                  <div key={log.id} className="flex gap-2 font-mono">
+                    <span className="text-muted-foreground shrink-0">
+                      [{log.timestamp}]
+                    </span>
+                    <span
+                      className={cn(
+                        log.level === "error"
+                          ? "text-rose-600 dark:text-rose-400 font-semibold"
+                          : log.level === "warn"
+                            ? "text-amber-600 dark:text-amber-400 font-medium"
+                            : "text-foreground",
+                      )}
+                    >
+                      {log.message}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </TabsContent>
 
           {/* Info Tab */}
-          <TabsContent value="info" className="mt-0">
-            <div className="bg-background px-2 text-xs divide-y divide-border/30">
+          <TabsContent value="info" className="mt-0 h-full flex-1 flex flex-col min-h-0">
+            <div className="bg-background px-2 text-xs divide-y divide-border/30 h-full flex-1 overflow-y-auto min-h-0 max-h-[500px]">
               <div className="flex justify-between p-3">
                 <span className="text-muted-foreground">Spec File:</span>
                 <span className="font-mono font-medium text-foreground">
@@ -537,15 +593,9 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
                 </span>
               </div>
               <div className="flex justify-between p-3">
-                <span className="text-muted-foreground">Retries:</span>
-                <span className="font-mono font-medium text-foreground">
-                  {tc.info.retries}
-                </span>
-              </div>
-              <div className="flex justify-between p-3">
-                <span className="text-muted-foreground">Environment:</span>
-                <span className="font-medium text-foreground">
-                  {tc.info.environment}
+                <span className="text-muted-foreground">URL:</span>
+                <span className="font-mono font-medium text-foreground truncate max-w-[220px]" title={tc.info.url}>
+                  {tc.info.url}
                 </span>
               </div>
             </div>
@@ -553,21 +603,31 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
         </div>
 
         {/* Right Content Area */}
-        <div className="lg:col-span-3 flex flex-col justify-center">
+        <div className="lg:col-span-3 flex flex-col items-center justify-center bg-muted/10 p-0 overflow-hidden">
           {currentShot ? (
-            <div className="relative flex-1 min-h-[300px] w-full  bg-muted/20  border-border/30 flex flex-col items-center justify-center p-6 text-center select-none">
-              <div className="size-10 rounded-full bg-background flex items-center justify-center mb-2.5 text-muted-foreground/80 border border-border/50 shadow-2xs">
-                <ImageIcon className="size-4" />
-              </div>
-              <p className="text-xs font-semibold text-foreground mb-1">
-                {currentShot.title}
-              </p>
-              <p className="text-[11px] font-mono text-muted-foreground/70">
-                Screenshot Placeholder
-              </p>
+            <div className="relative w-full h-full min-h-[300px] flex items-center justify-center select-none">
+              {currentShot.url ? (
+                <img
+                  src={currentShot.url}
+                  alt={currentShot.title}
+                  className="w-full max-w-full object-contain rounded-none border-none shadow-none"
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center p-6 text-center">
+                  <div className="size-10 rounded-full bg-background flex items-center justify-center mb-2.5 text-muted-foreground/80 border border-border/50 shadow-2xs">
+                    <ImageIcon className="size-4" />
+                  </div>
+                  <p className="text-xs font-semibold text-foreground mb-1">
+                    {currentShot.title}
+                  </p>
+                  <p className="text-[11px] font-mono text-muted-foreground/70">
+                    Screenshot Placeholder
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
-            <div className="flex h-full min-h-[300px] items-center justify-center rounded-xl text-xs text-muted-foreground bg-muted/20">
+            <div className="flex h-full min-h-[300px] items-center justify-center text-xs text-muted-foreground">
               No screenshots captured for this test case.
             </div>
           )}
@@ -578,13 +638,203 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
 }
 
 export function RunDetailView({ runId }: { runId: string }) {
+  const { getToken, isSignedIn } = useAuth();
+
+  const { data, isLoading } = useQuery({
+    queryKey: ["execution", runId],
+    queryFn: async () => {
+      const token = await getToken();
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      };
+
+      const resExec = await fetch(`${apiUrl}/api/executions/${runId}`, {
+        headers,
+      });
+      if (!resExec.ok) return null;
+      const execJson = await resExec.json();
+
+      // Fetch executed test cases from execution details endpoint using executionId foreign key
+      if (
+        execJson?.success &&
+        (!execJson.data.details || execJson.data.details.length === 0)
+      ) {
+        const resDetails = await fetch(
+          `${apiUrl}/api/executions/details/query/${runId}`,
+          { headers },
+        );
+        if (resDetails.ok) {
+          const detailsJson = await resDetails.json();
+          if (detailsJson?.data) {
+            execJson.data.details = detailsJson.data;
+          }
+        }
+      }
+
+      return execJson;
+    },
+    enabled: isSignedIn && !!runId,
+  });
+
+  const executionData = data?.data;
+  const executionDetails: any[] = executionData?.details || [];
+
+  const realTestCases: TestCaseData[] = executionDetails.map(
+    (detail: any, dIdx: number) => {
+      const rawStepsAll: any[] = Array.isArray(detail.step_reports)
+        ? detail.step_reports
+        : [];
+
+      const metaStep = rawStepsAll.find((s: any) => s.type === "__meta__");
+      const rawSteps = rawStepsAll.filter((s: any) => s.type !== "__meta__");
+
+      const steps: StepItem[] = rawSteps.map((step: any, idx: number) => {
+        const stepType = (step.type as StepType) || "act";
+        let desc = step.description || `Step ${idx + 1}`;
+        if (
+          stepType === "navigate" &&
+          !desc.toLowerCase().startsWith("navigate to")
+        ) {
+          desc = `Navigate to ${desc}`;
+        }
+        const isFailed =
+          step.success === false || step.status === "failed" || step.error;
+        return {
+          id: `step-${idx + 1}`,
+          description: desc,
+          type: stepType,
+          status: isFailed ? "failed" : "passed",
+        };
+      });
+
+      const screenshots: ScreenshotItem[] = rawSteps
+        .filter(
+          (step: any) =>
+            step.signedUrl ||
+            step.screenshotUrl ||
+            step.screenshotBase64 ||
+            step.screenshotPath ||
+            step.screenshot_path,
+        )
+        .map((step: any, idx: number) => {
+          let shotUrl: string | undefined = undefined;
+          if (step.signedUrl) {
+            shotUrl = step.signedUrl;
+          } else if (step.screenshotUrl) {
+            shotUrl = step.screenshotUrl.startsWith("http")
+              ? step.screenshotUrl
+              : `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001"}/${step.screenshotUrl}`;
+          } else if (step.screenshotBase64) {
+            shotUrl = step.screenshotBase64;
+          } else if (step.screenshotPath || step.screenshot_path) {
+            const path = step.screenshotPath || step.screenshot_path;
+            shotUrl = path.startsWith("http")
+              ? path
+              : `${process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001"}/${path}`;
+          }
+
+          let stepDesc = step.description || "Captured state";
+          if (
+            step.type === "navigate" &&
+            !stepDesc.toLowerCase().startsWith("navigate to")
+          ) {
+            stepDesc = `Navigate to ${stepDesc}`;
+          }
+
+          return {
+            id: `sc-${idx + 1}`,
+            title: `Step ${step.index || idx + 1}: ${stepDesc}`,
+            url: shotUrl,
+          };
+        });
+
+      const parseJsonArray = (val: any) => {
+        if (Array.isArray(val)) return val;
+        if (typeof val === "string") {
+          try {
+            const parsed = JSON.parse(val);
+            if (Array.isArray(parsed)) return parsed;
+          } catch (_) {}
+        }
+        return [];
+      };
+
+      const network: NetworkItem[] =
+        parseJsonArray(detail.network_reports || detail.network).length > 0
+          ? parseJsonArray(detail.network_reports || detail.network)
+          : metaStep?.networkReports || [];
+
+      const logs: LogItem[] =
+        parseJsonArray(detail.log_reports || detail.logs).length > 0
+          ? parseJsonArray(detail.log_reports || detail.logs)
+          : metaStep?.logReports || [];
+
+      const rawInfo =
+        detail.info && typeof detail.info === "object" && Object.keys(detail.info).length > 0
+          ? detail.info
+          : metaStep?.info || {};
+
+      const info: TestCaseInfo = {
+        specFile: rawInfo.specFile || detail.test_case_id || "test.yaml",
+        browser: rawInfo.browser || "Chromium 124.0",
+        duration:
+          rawInfo.duration ||
+          `${((detail.duration_ms || 0) / 1000).toFixed(1)}s`,
+        url:
+          rawInfo.url ||
+          rawInfo.environment ||
+          detail.target_url ||
+          executionData?.target_url ||
+          "—",
+      };
+
+      return {
+        id: detail.id || `tc-${dIdx + 1}`,
+        title: detail.title || `TC-${dIdx + 1}: ${detail.test_case_id}`,
+        status: detail.status === "passed" ? "passed" : "failed",
+        duration: `${((detail.duration_ms || 0) / 1000).toFixed(1)}s`,
+        steps,
+        network,
+        logs,
+        info,
+        screenshots,
+      };
+    },
+  );
+
+  const isRealExecutionFound = data?.success && !!executionData;
+  const testCasesToDisplay = isRealExecutionFound
+    ? realTestCases
+    : mockTestCases;
+  const defaultAccordionValue =
+    testCasesToDisplay.length > 0 ? [testCasesToDisplay[0].id] : [];
+
+  if (isLoading) {
+    return (
+      <div className="w-full py-12 text-center text-xs text-muted-foreground">
+        <RefreshCwIcon className="size-4 animate-spin mx-auto mb-2" />
+        Loading execution details...
+      </div>
+    );
+  }
+
+  if (isRealExecutionFound && testCasesToDisplay.length === 0) {
+    return (
+      <div className="w-full py-12 text-center text-xs text-muted-foreground bg-card rounded-xl border border-border/60">
+        No test case details recorded for this execution yet.
+      </div>
+    );
+  }
+
   return (
     <div className="w-full space-y-3">
       <Accordion
-        defaultValue={["tc-1"]}
+        defaultValue={defaultAccordionValue}
         className="w-full space-y-3 border-none"
       >
-        {mockTestCases.map((tc) => (
+        {testCasesToDisplay.map((tc) => (
           <AccordionItem
             key={tc.id}
             value={tc.id}
@@ -613,14 +863,6 @@ export function RunDetailView({ runId }: { runId: string }) {
                 <span className="font-semibold text-xs sm:text-sm text-foreground flex-1 truncate tracking-tight">
                   {tc.title}
                 </span>
-
-                <div className="flex items-center gap-3 text-xs text-muted-foreground/80 shrink-0 font-mono">
-                  <span className="flex items-center gap-1">
-                    <ClockIcon className="size-3.5" />
-                    {tc.duration}
-                  </span>
-                  <span>{tc.steps.length} steps</span>
-                </div>
               </div>
             </AccordionTrigger>
 

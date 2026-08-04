@@ -7,6 +7,7 @@
     "test": "tsx src/test-run.ts"
   },
   "dependencies": {
+    "@clerk/backend": "^3.15.0",
     "@google/genai": "^2.14.0",
     "@hono/node-server": "^2.0.11",
     "@supabase/supabase-js": "^2.110.8",

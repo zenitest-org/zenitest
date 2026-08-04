@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { streamText } from "hono/streaming";
 import { WebSocket } from "ws";
 import { chromium } from "playwright-core";
-import { supabase, uploadScreenshot } from "../db/supabase";
+import { supabase, uploadScreenshot, attachSignedUrlsToDetails } from "../db/supabase";
 import { Executor } from "../executor";
 import { TestCase, TestCaseExecutionReport } from "../types";
 import { authMiddleware, AuthUser } from "../middleware/auth";
@@ -44,7 +44,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
      Executions Endpoints
      ========================================================================== */
 
-  router.get("/query", async (c) => {
+  const queryExecutionsHandler = async (c: any) => {
     try {
       const authUser = c.get("user") as AuthUser;
       const userId =
@@ -54,9 +54,13 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
       const limit = Number(c.req.query("limit")) || 20;
       const offset = Number(c.req.query("offset")) || 0;
 
+      // Use explicit projection to return only necessary fields for executions list
       let query = supabase
         .from("executions")
-        .select("*", { count: "exact" })
+        .select(
+          "id, number, title, status, environment, total_test_cases, passed_test_cases, failed_test_cases, skipped_test_cases, total_duration_ms, total_tokens_used, created_at, started_at, completed_at, user_id",
+          { count: "exact" }
+        )
         .order("created_at", { ascending: false })
         .range(offset, offset + limit - 1);
 
@@ -83,12 +87,14 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
       console.error("[Executions Route] Exception querying executions:", err);
       return c.json({ success: false, error: err.message || String(err) }, 500);
     }
-  });
+  };
+
+  router.get("/", queryExecutionsHandler);
+  router.get("/query", queryExecutionsHandler);
 
   router.get("/:id", async (c) => {
     try {
       const id = c.req.param("id");
-      const includeDetails = c.req.query("details") === "true";
 
       const { data: execution, error } = await supabase
         .from("executions")
@@ -100,21 +106,19 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         return c.json({ success: false, error: "Execution not found" }, 404);
       }
 
-      let details: any[] = [];
-      if (includeDetails) {
-        const { data: detailsData } = await supabase
-          .from("execution_details")
-          .select("*")
-          .eq("execution_id", id)
-          .order("created_at", { ascending: true });
-        details = detailsData || [];
-      }
+      const { data: detailsData } = await supabase
+        .from("execution_details")
+        .select("*")
+        .eq("execution_id", execution.id)
+        .order("created_at", { ascending: true });
+
+      const detailsWithSignedUrls = await attachSignedUrlsToDetails(detailsData || []);
 
       return c.json({
         success: true,
         data: {
           ...execution,
-          ...(includeDetails ? { details } : {}),
+          details: detailsWithSignedUrls,
         },
       });
     } catch (err: any) {
@@ -326,17 +330,49 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
               processedStepReports.push(reportCopy);
             }
 
+            const metaItem = {
+              type: "__meta__",
+              networkReports: report.networkReports || [],
+              logReports: report.logReports || [],
+              info: report.info || {
+                specFile: tc.id ? `${tc.id}.yaml` : "test.yaml",
+                browser: "Chromium 124.0",
+                duration: `${(durationMs / 1000).toFixed(1)}s`,
+                url: tc.prodURL || tc.localURL || execution.target_url || "—",
+              },
+            };
+            const processedStepReportsWithMeta = [...processedStepReports, metaItem];
+
             if (detailRecord) {
-              await supabase
+              const updateData: any = {
+                status: report.overallSuccess ? "passed" : "failed",
+                duration_ms: durationMs,
+                step_reports: processedStepReportsWithMeta,
+                network_reports: report.networkReports || [],
+                log_reports: report.logReports || [],
+                info: report.info || metaItem.info,
+                error_message: report.error || null,
+                completed_at: new Date().toISOString(),
+              };
+
+              const { error: updateErr } = await supabase
                 .from("execution_details")
-                .update({
-                  status: report.overallSuccess ? "passed" : "failed",
-                  duration_ms: durationMs,
-                  step_reports: processedStepReports,
-                  error_message: report.error || null,
-                  completed_at: new Date().toISOString(),
-                })
+                .update(updateData)
                 .eq("id", detailRecord.id);
+
+              if (updateErr) {
+                console.error("[Executions Route] Supabase update warning:", updateErr.message);
+                await supabase
+                  .from("execution_details")
+                  .update({
+                    status: report.overallSuccess ? "passed" : "failed",
+                    duration_ms: durationMs,
+                    step_reports: processedStepReportsWithMeta,
+                    error_message: report.error || null,
+                    completed_at: new Date().toISOString(),
+                  })
+                  .eq("id", detailRecord.id);
+              }
             }
 
             await stream.writeln(
@@ -467,16 +503,48 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           processedStepReports.push(reportCopy);
         }
 
-        await supabase
+        const metaItem = {
+          type: "__meta__",
+          networkReports: report.networkReports || [],
+          logReports: report.logReports || [],
+          info: report.info || {
+            specFile: tc.id ? `${tc.id}.yaml` : "test.yaml",
+            browser: "Chromium 124.0",
+            duration: `${(durationMs / 1000).toFixed(1)}s`,
+            url: tc.prodURL || tc.localURL || execution.target_url || "—",
+          },
+        };
+        const processedStepReportsWithMeta = [...processedStepReports, metaItem];
+
+        const updateData: any = {
+          status: isSuccess ? "passed" : "failed",
+          duration_ms: durationMs,
+          step_reports: processedStepReportsWithMeta,
+          network_reports: report.networkReports || [],
+          log_reports: report.logReports || [],
+          info: report.info || metaItem.info,
+          error_message: report.error || null,
+          completed_at: new Date().toISOString(),
+        };
+
+        const { error: updateErr } = await supabase
           .from("execution_details")
-          .update({
-            status: isSuccess ? "passed" : "failed",
-            duration_ms: durationMs,
-            step_reports: processedStepReports,
-            error_message: report.error || null,
-            completed_at: new Date().toISOString(),
-          })
+          .update(updateData)
           .eq("id", detailRecord.id);
+
+        if (updateErr) {
+          console.error("[Executions Route] Supabase update warning:", updateErr.message);
+          await supabase
+            .from("execution_details")
+            .update({
+              status: isSuccess ? "passed" : "failed",
+              duration_ms: durationMs,
+              step_reports: processedStepReportsWithMeta,
+              error_message: report.error || null,
+              completed_at: new Date().toISOString(),
+            })
+            .eq("id", detailRecord.id);
+        }
       });
 
       await browser.close().catch(() => {});
@@ -551,7 +619,9 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         return c.json({ success: false, error: error.message }, 500);
       }
 
-      return c.json({ success: true, data });
+      const detailsWithSignedUrls = await attachSignedUrlsToDetails(data || []);
+
+      return c.json({ success: true, data: detailsWithSignedUrls });
     } catch (err: any) {
       console.error(
         "[Executions Route] Exception querying execution details:",
@@ -604,6 +674,9 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         duration_ms = 0,
         tokens_used = 0,
         step_reports = [],
+        network_reports = [],
+        log_reports = [],
+        info = {},
         error_message,
       } = body;
 
@@ -647,6 +720,9 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           target_url,
           duration_ms,
           step_reports: processedStepReports,
+          network_reports,
+          log_reports,
+          info,
           error_message,
           started_at: status === "running" ? new Date().toISOString() : null,
         })

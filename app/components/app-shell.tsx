@@ -1,10 +1,12 @@
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { AppHeader } from "@/components/app-header";
 import { AppSidebar } from "@/components/app-sidebar";
+import { AuthVerifier } from "@/components/auth-verifier";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <SidebarProvider defaultOpen={false}>
+      <AuthVerifier />
       <AppSidebar />
       <SidebarInset className="px-4 py-3.5 md:px-10 md:py-5">
         <AppHeader />
@@ -13,3 +15,4 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     </SidebarProvider>
   );
 }
+

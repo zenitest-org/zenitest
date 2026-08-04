@@ -133,12 +133,37 @@ export interface StepExecutionReport {
   cacheKey?: string;
 }
 
+export interface NetworkReportItem {
+  id: string;
+  method: string;
+  url: string;
+  status: number;
+  time: string;
+}
+
+export interface LogReportItem {
+  id: string;
+  timestamp: string;
+  level: "info" | "warn" | "error";
+  message: string;
+}
+
+export interface ExecutionInfo {
+  specFile: string;
+  browser: string;
+  duration: string;
+  url: string;
+}
+
 export interface TestCaseExecutionReport {
   testCaseId: string;
   title: string;
   overallSuccess: boolean;
   targetURL: string;
   stepReports: StepExecutionReport[];
+  networkReports?: NetworkReportItem[];
+  logReports?: LogReportItem[];
+  info?: ExecutionInfo;
   totalExecutionTimeMs: number;
   totalTokensUsed: number;
   error?: string;

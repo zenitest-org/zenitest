@@ -11,11 +11,12 @@ export function createAuthRouter() {
     const user = c.get("user") as AuthUser;
     return c.json({
       success: true,
-      message: "API key verified successfully",
+      message: "User verified successfully",
       user: {
         id: user.id,
         email: user.email,
         name: user.name,
+        api_key: user.api_key,
       },
     });
   };

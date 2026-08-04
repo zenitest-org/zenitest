@@ -67,4 +67,69 @@ export async function uploadScreenshot(
   }
 }
 
+/**
+ * Generates a signed URL for a relative screenshot path in the 'screenshots' storage bucket.
+ * Default expiration is 3600 seconds (1 hour).
+ */
+export async function getSignedScreenshotUrl(
+  filePath: string,
+  expiresIn: number = 3600
+): Promise<string | null> {
+  try {
+    if (!filePath) return null;
+    const cleanPath = filePath.replace(/^screenshots\//, "");
+
+    const { data, error } = await supabase.storage
+      .from("screenshots")
+      .createSignedUrl(cleanPath, expiresIn);
+
+    if (error || !data?.signedUrl) {
+      console.error("[Supabase Storage] Error creating signed URL:", error?.message);
+      return null;
+    }
+
+    return data.signedUrl;
+  } catch (err: any) {
+    console.error("[Supabase Storage] Exception creating signed URL:", err.message || err);
+    return null;
+  }
+}
+
+/**
+ * Iterates over execution details and generates signed URLs for step report screenshots.
+ */
+export async function attachSignedUrlsToDetails(details: any[]): Promise<any[]> {
+  if (!Array.isArray(details) || details.length === 0) return details;
+
+  return Promise.all(
+    details.map(async (detail) => {
+      if (!detail.step_reports || !Array.isArray(detail.step_reports)) {
+        return detail;
+      }
+
+      const updatedSteps = await Promise.all(
+        detail.step_reports.map(async (step: any) => {
+          const path = step.screenshotPath || step.screenshot_path;
+          if (path) {
+            const signedUrl = await getSignedScreenshotUrl(path);
+            if (signedUrl) {
+              return {
+                ...step,
+                signedUrl,
+                screenshotUrl: signedUrl,
+              };
+            }
+          }
+          return step;
+        })
+      );
+
+      return {
+        ...detail,
+        step_reports: updatedSteps,
+      };
+    })
+  );
+}
+
 export default supabase;
