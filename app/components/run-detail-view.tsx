@@ -28,6 +28,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+
 export type StepType = "act" | "navigate" | "validate";
 
 export interface StepItem {
@@ -39,10 +46,14 @@ export interface StepItem {
 
 export interface NetworkItem {
   id: string;
-  method: "GET" | "POST" | "PUT" | "DELETE";
+  method: string;
   url: string;
   status: number;
-  time: string;
+  time?: string;
+  requestHeaders?: Record<string, string>;
+  requestBody?: string | null;
+  responseHeaders?: Record<string, string>;
+  responseBody?: string | null;
 }
 
 export interface LogItem {
@@ -116,27 +127,83 @@ const mockTestCases: TestCaseData[] = [
       },
     ],
     network: [
-      { id: "n1", method: "GET", url: "/login", status: 200, time: "110ms" },
+      {
+        id: "n1",
+        method: "GET",
+        url: "https://app.zenitest.com/login",
+        status: 200,
+        requestHeaders: {
+          accept: "text/html,application/xhtml+xml",
+          "user-agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+        },
+        responseHeaders: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-cache",
+        },
+        responseBody:
+          '<!DOCTYPE html>\n<html>\n  <head><title>Login - ZeniTest</title></head>\n  <body><div id="root"></div></body>\n</html>',
+      },
       {
         id: "n2",
         method: "POST",
-        url: "/api/auth/login",
+        url: "https://app.zenitest.com/api/auth/login",
         status: 200,
-        time: "320ms",
+        requestHeaders: {
+          "content-type": "application/json",
+          accept: "application/json",
+        },
+        requestBody: JSON.stringify(
+          { email: "user@example.com", password: "••••••••" },
+          null,
+          2,
+        ),
+        responseHeaders: {
+          "content-type": "application/json",
+          "set-cookie": "session_id=sess_abc123; Path=/; HttpOnly; Secure",
+        },
+        responseBody: JSON.stringify(
+          {
+            success: true,
+            user: { id: "u_1", email: "user@example.com", name: "Alex" },
+          },
+          null,
+          2,
+        ),
       },
       {
         id: "n3",
         method: "GET",
-        url: "/api/user/profile",
+        url: "https://app.zenitest.com/api/user/profile",
         status: 200,
-        time: "95ms",
+        requestHeaders: {
+          authorization: "Bearer eyJhbGciOiJIUzI1Ni...",
+          accept: "application/json",
+        },
+        responseHeaders: {
+          "content-type": "application/json",
+        },
+        responseBody: JSON.stringify(
+          { id: "u_1", name: "Alex", role: "admin" },
+          null,
+          2,
+        ),
       },
       {
         id: "n4",
         method: "GET",
-        url: "/api/analytics/summary",
+        url: "https://app.zenitest.com/api/analytics/summary",
         status: 200,
-        time: "180ms",
+        requestHeaders: {
+          accept: "application/json",
+        },
+        responseHeaders: {
+          "content-type": "application/json",
+        },
+        responseBody: JSON.stringify(
+          { totalRuns: 142, passRate: 0.98 },
+          null,
+          2,
+        ),
       },
     ],
     logs: [
@@ -358,7 +425,112 @@ function StepTypeBadge({ type }: { type: StepType }) {
   );
 }
 
+function NetworkUrlValue({ url }: { url: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const isLong = url.length > 90;
+
+  return (
+    <div className="sm:col-span-8 flex flex-col items-end gap-0.5">
+      <span
+        className={cn(
+          "text-muted-foreground text-right [word-break:break-word] select-all font-normal transition-all",
+          !expanded && "line-clamp-3",
+        )}
+        title={url}
+      >
+        {url}
+      </span>
+      {isLong && (
+        <button
+          type="button"
+          onClick={() => setExpanded(!expanded)}
+          className="text-[10px] text-primary hover:underline font-medium focus:outline-none shrink-0"
+        >
+          {expanded ? "Show less" : "See all"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function NetworkHeadersSection({
+  headers,
+}: {
+  headers?: Record<string, string>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!headers || Object.keys(headers).length === 0) {
+    return (
+      <div className="text-xs text-muted-foreground italic font-mono p-3">
+        No headers recorded.
+      </div>
+    );
+  }
+
+  const entries = Object.entries(headers);
+  const isLong = entries.length > 5;
+  const visibleEntries = expanded ? entries : entries.slice(0, 5);
+
+  return (
+    <div className="font-mono text-[11px] divide-y divide-border/30 border-b border-border/30">
+      {visibleEntries.map(([key, val]) => (
+        <div
+          key={key}
+          className="grid grid-cols-1 sm:grid-cols-12 gap-1 py-1.5 px-3 hover:bg-muted/20 transition-colors"
+        >
+          <span className="sm:col-span-4 text-foreground/80 font-medium break-all select-all">
+            {key}:
+          </span>
+          <span className="sm:col-span-8 text-muted-foreground text-right break-all select-all font-normal">
+            {val}
+          </span>
+        </div>
+      ))}
+      {isLong && (
+        <div className="py-1.5 px-3 flex justify-end bg-muted/10">
+          <button
+            type="button"
+            onClick={() => setExpanded(!expanded)}
+            className="text-[10px] text-primary hover:underline font-medium focus:outline-none"
+          >
+            {expanded ? "Show less" : `See all (${entries.length - 5} more)`}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function renderNetworkHeaders(headers?: Record<string, string>) {
+  return <NetworkHeadersSection headers={headers} />;
+}
+
+function renderNetworkBody(body?: string | null) {
+  if (!body || body.trim() === "") {
+    return (
+      <div className="text-xs text-muted-foreground italic font-mono p-3">
+        No body recorded.
+      </div>
+    );
+  }
+
+  let formatted = body;
+  try {
+    const parsed = JSON.parse(body);
+    formatted = JSON.stringify(parsed, null, 2);
+  } catch (_) {}
+
+  return (
+    <pre className="font-mono text-[11px] text-foreground/90 overflow-auto w-full h-full p-3 m-0 whitespace-pre">
+      <code>{formatted}</code>
+    </pre>
+  );
+}
+
 function TestCaseDetail({ tc }: { tc: TestCaseData }) {
+  const [selectedNetworkItem, setSelectedNetworkItem] =
+    useState<NetworkItem | null>(null);
   const screenshots = tc.screenshots || [];
   const [screenshotIndex, setScreenshotIndex] = useState(() =>
     screenshots.length > 0 ? screenshots.length - 1 : 0,
@@ -465,7 +637,10 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
       <div className="grid grid-cols-1 lg:grid-cols-5 divide-y lg:divide-y-0 lg:divide-x divide-border/40 min-h-[350px]">
         {/* Left Content Area */}
         <div className="lg:col-span-2 flex flex-col h-full min-h-0">
-          <TabsContent value="steps" className="mt-0 space-y-1 h-full flex-1 overflow-y-auto min-h-0 max-h-[500px]">
+          <TabsContent
+            value="steps"
+            className="mt-0 space-y-1 h-full flex-1 overflow-y-auto min-h-0 max-h-[500px]"
+          >
             {tc.steps.map((step, idx) => (
               <div
                 key={step.id}
@@ -492,7 +667,10 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
             ))}
           </TabsContent>
 
-          <TabsContent value="network" className="mt-0 h-full flex-1 flex flex-col min-h-0">
+          <TabsContent
+            value="network"
+            className="mt-0 h-full flex-1 flex flex-col min-h-0 relative overflow-hidden"
+          >
             <div className="bg-background h-full flex-1 overflow-y-auto min-h-0 max-h-[500px]">
               {tc.network.length === 0 ? (
                 <div className="py-8 text-center text-xs text-muted-foreground">
@@ -505,44 +683,190 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
                       <th className="py-2.5 px-4 bg-muted/50">Method</th>
                       <th className="py-2.5 px-4 bg-muted/50">URL</th>
                       <th className="py-2.5 px-4 bg-muted/50">Status</th>
-                      <th className="py-2.5 px-4 bg-muted/50 text-right">Time</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border/30">
-                    {tc.network.map((req) => (
-                      <tr key={req.id} className="hover:bg-muted/20">
-                        <td className="py-2 px-4 font-mono font-semibold text-[11px]">
-                          {req.method}
-                        </td>
-                        <td className="py-2 px-4 font-mono text-muted-foreground truncate max-w-[150px] sm:max-w-[220px]" title={req.url}>
-                          {req.url}
-                        </td>
-                        <td className="py-2 px-4">
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "font-mono text-[10px] px-1.5 py-0 rounded",
-                              req.status < 300
-                                ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20"
-                                : "text-rose-600 bg-rose-500/10 border-rose-500/20",
-                            )}
+                    {tc.network.map((req) => {
+                      const isSelected = selectedNetworkItem?.id === req.id;
+                      return (
+                        <tr
+                          key={req.id}
+                          onClick={() => setSelectedNetworkItem(req)}
+                          className={cn(
+                            "cursor-pointer transition-colors",
+                            isSelected
+                              ? "bg-primary/10 dark:bg-primary/20"
+                              : "hover:bg-muted/30",
+                          )}
+                        >
+                          <td className="py-2.5 px-4 font-mono font-semibold text-[11px]">
+                            {req.method}
+                          </td>
+                          <td
+                            className="py-2.5 px-4 font-mono text-muted-foreground truncate max-w-[180px] sm:max-w-[260px]"
+                            title={req.url}
                           >
-                            {req.status}
-                          </Badge>
-                        </td>
-                        <td className="py-2 px-4 text-right font-mono text-muted-foreground">
-                          {req.time}
-                        </td>
-                      </tr>
-                    ))}
+                            {req.url}
+                          </td>
+                          <td className="py-2.5 px-4">
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "font-mono text-[10px] px-1.5 py-0 rounded",
+                                req.status < 300
+                                  ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20"
+                                  : req.status < 400
+                                    ? "text-amber-600 bg-amber-500/10 border-amber-500/20"
+                                    : "text-rose-600 bg-rose-500/10 border-rose-500/20",
+                              )}
+                            >
+                              {req.status}
+                            </Badge>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
             </div>
+
+            {/* Inline Drawer inside Network Table container */}
+            {selectedNetworkItem && (
+              <div className="absolute top-0 right-0 bottom-0 w-[80%] sm:w-[80%] max-w-full z-20 bg-background flex flex-col border-l border-border/40 shadow-xl animate-in slide-in-from-right duration-200">
+                <Tabs
+                  defaultValue="headers"
+                  className="w-full flex flex-col h-full min-h-0"
+                >
+                  {/* Header Row: Close button on left, 3 tabs on right */}
+                  <div className="px-3 h-9 border-b border-border/40 flex items-center justify-between bg-muted/20 shrink-0 gap-2">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setSelectedNetworkItem(null)}
+                      className="size-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/40 shrink-0"
+                      title="Close details"
+                    >
+                      <XIcon className="size-3.5" />
+                      <span className="sr-only">Close</span>
+                    </Button>
+
+                    <TabsList className="bg-transparent p-0 h-9 shrink-0 gap-4 border-b-0 rounded-none">
+                      <TabsTrigger
+                        value="headers"
+                        className="h-9 px-0.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:text-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-xs font-semibold text-muted-foreground hover:text-foreground transition-all"
+                      >
+                        Headers
+                      </TabsTrigger>
+                      <TabsTrigger
+                        value="request"
+                        className="h-9 px-0.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:text-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-xs font-semibold text-muted-foreground hover:text-foreground transition-all"
+                      >
+                        Request
+                      </TabsTrigger>
+                      <TabsTrigger
+                        value="response"
+                        className="h-9 px-0.5 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:text-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none text-xs font-semibold text-muted-foreground hover:text-foreground transition-all"
+                      >
+                        Response
+                      </TabsTrigger>
+                    </TabsList>
+                  </div>
+
+                  {/* Tab Contents */}
+                  <div className="flex-1 overflow-hidden min-h-0 flex flex-col">
+                    <TabsContent
+                      value="headers"
+                      className="mt-0 space-y-0 p-0 overflow-y-auto flex-1 min-h-0"
+                    >
+                      {/* General Section */}
+                      <div>
+                        <h4 className="text-[11px] font-semibold text-foreground/90 uppercase tracking-wider font-mono px-3 py-1.5 bg-muted/40 border-b border-border/30">
+                          General
+                        </h4>
+                        <div className="font-mono text-[11px] divide-y divide-border/30 border-b border-border/30">
+                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-1 py-1.5 px-3 hover:bg-muted/20 transition-colors items-start">
+                            <span className="sm:col-span-4 text-foreground/80 font-medium select-all">
+                              Request URL:
+                            </span>
+                            <NetworkUrlValue url={selectedNetworkItem.url} />
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-1 py-1.5 px-3 hover:bg-muted/20 transition-colors">
+                            <span className="sm:col-span-4 text-foreground/80 font-medium select-all">
+                              Request Method:
+                            </span>
+                            <span className="sm:col-span-8 text-foreground text-right font-semibold select-all">
+                              {selectedNetworkItem.method}
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-12 gap-1 py-1.5 px-3 items-center hover:bg-muted/20 transition-colors">
+                            <span className="sm:col-span-4 text-foreground/80 font-medium select-all">
+                              Status Code:
+                            </span>
+                            <div className="sm:col-span-8 flex items-center justify-end gap-1.5">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "font-mono text-[10px] px-1.5 py-0 rounded shrink-0",
+                                  selectedNetworkItem.status < 300
+                                    ? "text-emerald-600 bg-emerald-500/10 border-emerald-500/20"
+                                    : selectedNetworkItem.status < 400
+                                      ? "text-amber-600 bg-amber-500/10 border-amber-500/20"
+                                      : "text-rose-600 bg-rose-500/10 border-rose-500/20",
+                                )}
+                              >
+                                {selectedNetworkItem.status}
+                              </Badge>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Response Headers Section */}
+                      <div>
+                        <h4 className="text-[11px] font-semibold text-foreground/90 uppercase tracking-wider font-mono px-3 py-1.5 bg-muted/40 border-b border-border/30">
+                          Response Headers
+                        </h4>
+                        {renderNetworkHeaders(
+                          selectedNetworkItem.responseHeaders,
+                        )}
+                      </div>
+
+                      {/* Request Headers Section */}
+                      <div>
+                        <h4 className="text-[11px] font-semibold text-foreground/90 uppercase tracking-wider font-mono px-3 py-1.5 bg-muted/40 border-b border-border/30">
+                          Request Headers
+                        </h4>
+                        {renderNetworkHeaders(
+                          selectedNetworkItem.requestHeaders,
+                        )}
+                      </div>
+                    </TabsContent>
+
+                    <TabsContent
+                      value="request"
+                      className="mt-0 h-full flex-1 overflow-auto min-h-0 p-0"
+                    >
+                      {renderNetworkBody(selectedNetworkItem.requestBody)}
+                    </TabsContent>
+
+                    <TabsContent
+                      value="response"
+                      className="mt-0 h-full flex-1 overflow-auto min-h-0 p-0"
+                    >
+                      {renderNetworkBody(selectedNetworkItem.responseBody)}
+                    </TabsContent>
+                  </div>
+                </Tabs>
+              </div>
+            )}
           </TabsContent>
 
           {/* Logs Tab */}
-          <TabsContent value="logs" className="mt-0 h-full flex-1 flex flex-col min-h-0">
+          <TabsContent
+            value="logs"
+            className="mt-0 h-full flex-1 flex flex-col min-h-0"
+          >
             {tc.logs.length === 0 ? (
               <div className="py-8 text-center text-xs text-muted-foreground font-mono">
                 No console logs recorded for this test.
@@ -572,7 +896,10 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
           </TabsContent>
 
           {/* Info Tab */}
-          <TabsContent value="info" className="mt-0 h-full flex-1 flex flex-col min-h-0">
+          <TabsContent
+            value="info"
+            className="mt-0 h-full flex-1 flex flex-col min-h-0"
+          >
             <div className="bg-background px-2 text-xs divide-y divide-border/30 h-full flex-1 overflow-y-auto min-h-0 max-h-[500px]">
               <div className="flex justify-between p-3">
                 <span className="text-muted-foreground">Spec File:</span>
@@ -594,7 +921,10 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
               </div>
               <div className="flex justify-between p-3">
                 <span className="text-muted-foreground">URL:</span>
-                <span className="font-mono font-medium text-foreground truncate max-w-[220px]" title={tc.info.url}>
+                <span
+                  className="font-mono font-medium text-foreground truncate max-w-[220px]"
+                  title={tc.info.url}
+                >
                   {tc.info.url}
                 </span>
               </div>
@@ -772,7 +1102,9 @@ export function RunDetailView({ runId }: { runId: string }) {
           : metaStep?.logReports || [];
 
       const rawInfo =
-        detail.info && typeof detail.info === "object" && Object.keys(detail.info).length > 0
+        detail.info &&
+        typeof detail.info === "object" &&
+        Object.keys(detail.info).length > 0
           ? detail.info
           : metaStep?.info || {};
 

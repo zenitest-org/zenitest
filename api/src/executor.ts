@@ -503,7 +503,7 @@ export class Executor {
       message: `Starting execution for test case "${testCase.title}" (${testCase.id})`,
     });
 
-    page.on("response", (res: any) => {
+    page.on("response", async (res: any) => {
       try {
         const req = res.request();
         const urlStr = req.url();
@@ -512,10 +512,54 @@ export class Executor {
           const durationMs = timing && timing.responseEnd > 0 ? Math.round(timing.responseEnd) : 0;
           const timeStr = durationMs > 0 ? `${durationMs}ms` : "—";
 
-          let displayUrl = urlStr;
+          const displayUrl = urlStr;
+
+          let reqHeaders: Record<string, string> = {};
           try {
-            const parsed = new URL(urlStr);
-            displayUrl = parsed.pathname + parsed.search;
+            reqHeaders = req.headers() || {};
+          } catch (_) {}
+
+          let reqBody: string | null = null;
+          try {
+            const rawReqBody = req.postData() || null;
+            if (rawReqBody) {
+              reqBody = rawReqBody.replace(/\u0000/g, "").replace(/\\u0000/g, "");
+            }
+          } catch (_) {}
+
+          let resHeaders: Record<string, string> = {};
+          try {
+            resHeaders = res.headers() || {};
+          } catch (_) {}
+
+          let resBody: string | null = null;
+          try {
+            const contentType = (resHeaders["content-type"] || "").toLowerCase();
+            const isBinary =
+              contentType.includes("image/") ||
+              contentType.includes("font/") ||
+              contentType.includes("video/") ||
+              contentType.includes("audio/") ||
+              contentType.includes("application/octet-stream") ||
+              contentType.includes("application/zip") ||
+              contentType.includes("application/pdf") ||
+              contentType.includes("application/gzip") ||
+              contentType.includes("application/protobuf") ||
+              contentType.includes("application/x-protobuf");
+
+            if (isBinary) {
+              resBody = "[Binary Data]";
+            } else {
+              const buffer = await res.body().catch(() => null);
+              if (buffer) {
+                const maxLen = 50000;
+                const rawStr =
+                  buffer.length <= maxLen
+                    ? buffer.toString("utf-8")
+                    : buffer.slice(0, maxLen).toString("utf-8") + "\n... [truncated]";
+                resBody = rawStr.replace(/\u0000/g, "").replace(/\\u0000/g, "");
+              }
+            }
           } catch (_) {}
 
           networkReports.push({
@@ -524,6 +568,10 @@ export class Executor {
             url: displayUrl,
             status: res.status(),
             time: timeStr,
+            requestHeaders: reqHeaders,
+            requestBody: reqBody,
+            responseHeaders: resHeaders,
+            responseBody: resBody,
           });
         }
       } catch (_) {}

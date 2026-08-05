@@ -30,6 +30,27 @@ async function runConcurrentTasks<T>(
   await Promise.all(workers);
 }
 
+function sanitizeForJsonb<T>(obj: T): T {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj === "string") {
+    return obj
+      .replace(/\u0000/g, "")
+      .replace(/\\u0000/g, "")
+      .replace(/\\u000[0-9a-fA-F]/g, "") as unknown as T;
+  }
+  if (Array.isArray(obj)) {
+    return obj.map((item) => sanitizeForJsonb(item)) as unknown as T;
+  }
+  if (typeof obj === "object") {
+    const sanitized: any = {};
+    for (const key of Object.keys(obj as any)) {
+      sanitized[key] = sanitizeForJsonb((obj as any)[key]);
+    }
+    return sanitized as T;
+  }
+  return obj;
+}
+
 export interface ExecutionsRouteContext {
   clients: Map<string, WebSocket>;
   port: number;
@@ -344,7 +365,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             const processedStepReportsWithMeta = [...processedStepReports, metaItem];
 
             if (detailRecord) {
-              const updateData: any = {
+              const updateData: any = sanitizeForJsonb({
                 status: report.overallSuccess ? "passed" : "failed",
                 duration_ms: durationMs,
                 step_reports: processedStepReportsWithMeta,
@@ -353,7 +374,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                 info: report.info || metaItem.info,
                 error_message: report.error || null,
                 completed_at: new Date().toISOString(),
-              };
+              });
 
               const { error: updateErr } = await supabase
                 .from("execution_details")
@@ -516,7 +537,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         };
         const processedStepReportsWithMeta = [...processedStepReports, metaItem];
 
-        const updateData: any = {
+        const updateData: any = sanitizeForJsonb({
           status: isSuccess ? "passed" : "failed",
           duration_ms: durationMs,
           step_reports: processedStepReportsWithMeta,
@@ -525,7 +546,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           info: report.info || metaItem.info,
           error_message: report.error || null,
           completed_at: new Date().toISOString(),
-        };
+        });
 
         const { error: updateErr } = await supabase
           .from("execution_details")

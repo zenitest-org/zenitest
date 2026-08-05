@@ -139,6 +139,10 @@ export interface NetworkReportItem {
   url: string;
   status: number;
   time: string;
+  requestHeaders?: Record<string, string>;
+  requestBody?: string | null;
+  responseHeaders?: Record<string, string>;
+  responseBody?: string | null;
 }
 
 export interface LogReportItem {
