@@ -1,1 +1,28 @@
-/* Default Starlight Theme */
+/* Expressive Code block styling fixes */
+
+/* Hide window control dots (3-dot titlebar) from code blocks */
+.expressive-code .frame .header::before,
+.expressive-code .frame:not(.has-title) .header::before {
+	display: none !important;
+	content: none !important;
+}
+
+/* Make titlebar seamless for code blocks without a title */
+.expressive-code .frame:not(.has-title) .header {
+	background: transparent !important;
+	border-bottom: none !important;
+	min-height: 2.25rem !important;
+	padding: 0.25rem 0.5rem !important;
+}
+
+/* Ensure code blocks have rounded corners and proper code text padding */
+.expressive-code .frame {
+	border-radius: 8px !important;
+	overflow: hidden !important;
+}
+
+/* Position copy button neatly in header */
+.expressive-code .frame .copy {
+	top: 0.25rem !important;
+	right: 0.5rem !important;
+}

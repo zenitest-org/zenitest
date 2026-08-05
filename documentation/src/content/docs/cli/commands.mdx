@@ -3,6 +3,8 @@ title: CLI Commands
 description: Reference for zenitest CLI commands and installation.
 ---
 
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
 # CLI Reference
 
 Execute tests and manage authentication from your terminal.
@@ -11,15 +13,30 @@ Execute tests and manage authentication from your terminal.
 
 ## Installation
 
-Install the `zenitest` CLI globally:
+Install the `zenitest` CLI globally using your preferred package manager:
 
-```bash
-# Using npm
-npm install -g zenitest
-
-# Or using bun
-bun install -g zenitest
-```
+<Tabs>
+  <TabItem label="npm">
+    ```bash
+    npm install -g zenitest
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```bash
+    pnpm add -g zenitest
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```bash
+    yarn global add zenitest
+    ```
+  </TabItem>
+  <TabItem label="bun">
+    ```bash
+    bun install -g zenitest
+    ```
+  </TabItem>
+</Tabs>
 
 ---
 

@@ -1,9 +1,9 @@
 ---
-title: Agent Skills Setup
-description: How to install and use ZeniTest Agent Skills with Claude Code, Codex, and Cursor.
+title: AI Agent Skills
+description: How to install and use ZeniTest Agent Skills with Claude Code, Codex, and Cursor using /zenitest slash commands.
 ---
 
-# ZeniTest AI Agent Skills
+import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 ZeniTest provides a dedicated **Agent Skill** so AI coding assistants (**Claude Code**, **OpenAI Codex**, **Cursor**, **Antigravity**, etc.) can automatically generate, run, and maintain test cases as your application evolves.
 
@@ -13,11 +13,30 @@ ZeniTest provides a dedicated **Agent Skill** so AI coding assistants (**Claude 
 
 ### Option 1: Automatic Installation (Recommended)
 
-Run the CLI command in your project root:
+Run the skill installer using your package manager in your project root:
 
-```bash
-npx skills add zeni-org/zenitest
-```
+<Tabs>
+  <TabItem label="npm">
+    ```bash
+    npx skills add zeni-org/zenitest
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```bash
+    pnpm dlx skills add zeni-org/zenitest
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```bash
+    yarn dlx skills add zeni-org/zenitest
+    ```
+  </TabItem>
+  <TabItem label="bun">
+    ```bash
+    bunx skills add zeni-org/zenitest
+    ```
+  </TabItem>
+</Tabs>
 
 This installs the `zenitest` skill configuration into your project's `.agents/skills/` directory.
 
@@ -33,7 +52,7 @@ mkdir -p .agents/skills/zenitest
 
 Add the following content to `.agents/skills/zenitest/SKILL.md`:
 
-```markdown
+````markdown
 ---
 name: zenitest
 description: Instructions for generating and maintaining ZeniTest YAML test cases and running the zenitest CLI.
@@ -64,19 +83,25 @@ To run tests:
 ```bash
 zenitest run --dir zeni_tests
 ```
-```
+````
 
 ---
 
-## Using Skills with AI Coding Agents
+## Using `/zenitest` Slash Commands
 
-Once installed, your AI coding assistant will automatically detect the ZeniTest skill and help you generate and maintain test suites:
+Once the skill is installed, simply type `/zenitest` followed by your prompt in your AI agent chat interface:
 
-### 1. Generate Tests for New Features
-> *"I built a checkout feature. Use ZeniTest to create an E2E test file in `zeni_tests/`."*
+### 1. Generate New Test Cases
+```text
+/zenitest Create an E2E test case for the new checkout page at /checkout
+```
 
-### 2. Auto-Maintain Tests During Refactoring
-> *"We updated the login button text to 'Sign In'. Please update our ZeniTest suite."*
+### 2. Update Existing Tests During Refactoring
+```text
+/zenitest We updated the login button label from 'Login' to 'Sign In'. Please update our test suite in zeni_tests/
+```
 
-### 3. Run and Self-Heal Tests
-> *"Run `zenitest run` and fix any failing test scenarios."*
+### 3. Run & Self-Heal Test Suites
+```text
+/zenitest Run the test suite and fix any failing test scenarios
+```
