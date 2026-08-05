@@ -5,11 +5,13 @@
   "workspaces": [
     "api",
     "app",
-    "cli"
+    "cli",
+    "documentation"
   ],
   "scripts": {
     "dev": "turbo run dev",
     "dev:app": "bun --cwd app dev",
+    "dev:docs": "bun --cwd documentation dev",
     "dev:api": "bun --cwd api ",
     "build": "turbo run build",
     "server": "turbo run server",

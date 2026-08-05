@@ -1,0 +1,38 @@
+---
+title: YAML Format
+description: Overview of the ZeniTest test case format.
+---
+
+# YAML Test Case Structure
+
+ZeniTest test files are saved as `.yaml` files in your test folder (default: `zeni_tests`).
+
+## Test Case Fields
+
+```yaml
+id: tc_unique_id               # Required: Unique test ID
+title: Human Readable Title    # Required: Brief summary
+prodURL: https://example.com   # Required: Base URL to test
+expectedResult: Outcome text  # Required: Expected result
+variables:                     # Optional: Custom variables
+  user: alex
+steps:                         # Required: List of test actions
+  - navigate: /
+  - act: Click 'Sign In'
+  - validate: Verify dashboard is visible
+```
+
+## Basic Template
+
+Copy and save as `zeni_tests/my_first_test.yaml`:
+
+```yaml
+id: tc_001
+title: Example Test
+prodURL: https://example.com
+expectedResult: Page title is visible.
+
+steps:
+  - navigate: /
+  - validate: Verify 'Example Domain' heading is visible
+```

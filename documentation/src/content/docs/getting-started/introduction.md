@@ -1,0 +1,21 @@
+---
+title: Introduction
+description: Learn what ZeniTest does and why to use it.
+---
+
+# Introduction
+
+**ZeniTest** is an AI-powered automated testing tool. It lets you write end-to-end (E2E) browser tests in simple YAML files using natural language instructions.
+
+## Key Features
+
+- **No CSS/XPath Maintenance**: Describe what to click or type in plain English.
+- **AI Visual Verification**: Verify page content visually without complex assertions.
+- **Built-in Secret Security**: Use `${secret.MY_KEY}` to keep credentials safe.
+- **Parallel Runs**: Execute test suites concurrently with a single flag.
+
+## How It Works
+
+1. **Write YAML**: Define your test scenario in a `.yaml` file inside `zeni_tests/`.
+2. **Run CLI**: Execute `zenitest run` in your terminal.
+3. **Get Results**: The Zeni AI runs your tests and reports results in real time.

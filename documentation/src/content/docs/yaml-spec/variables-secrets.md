@@ -1,0 +1,38 @@
+---
+title: Variables & Secrets
+description: How to use variables and keep secrets safe in ZeniTest.
+---
+
+# Variables & Secrets
+
+## 1. Using Variables (`${variable}`)
+
+Define reusable variables at the top of your test file:
+
+```yaml
+variables:
+  query: Mechanical Keyboard
+
+steps:
+  - act: Type '${query}' into search bar
+```
+
+## 2. Using Secrets (`${secret.KEY}`)
+
+To keep passwords and API keys out of git repositories, use `${secret.KEY}` in your test steps:
+
+```yaml
+steps:
+  - act: Type '${secret.SAUCE_PASSWORD}' into 'Password'
+```
+
+### Storing Secrets (`secrets.yaml`)
+
+Create a `secrets.yaml` file in your test folder or project root:
+
+```yaml
+secrets:
+  SAUCE_PASSWORD: secret_sauce
+```
+
+ZeniTest also checks environment variables automatically (e.g. `SECRET_SAUCE_PASSWORD`).
