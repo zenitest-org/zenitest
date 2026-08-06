@@ -2,7 +2,9 @@
   "name": "api",
   "version": "1.0.0",
   "type": "module",
+  "main": "src/server.ts",
   "scripts": {
+    "start": "tsx src/server.ts",
     "server": "tsx src/server.ts",
     "test": "tsx src/test-run.ts"
   },
