@@ -11,6 +11,7 @@ export default defineConfig({
   integrations: [
     starlight({
       title: "ZeniTest Docs",
+      favicon: "/favicon.svg",
       description: "AI-powered E2E automated browser testing made simple.",
       customCss: ["./src/styles/custom.css"],
       plugins: [
