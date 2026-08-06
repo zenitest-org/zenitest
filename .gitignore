@@ -10,3 +10,5 @@ playwright-browsers/
 .cache
 .turbo
 zeni_tests
+.env.prod
+.env.local
