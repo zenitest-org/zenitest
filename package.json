@@ -9,6 +9,7 @@
     "documentation"
   ],
   "scripts": {
+    "start": "bun --cwd api start",
     "dev": "turbo run dev",
     "dev:app": "bun --cwd app dev",
     "dev:docs": "bun --cwd documentation dev",
