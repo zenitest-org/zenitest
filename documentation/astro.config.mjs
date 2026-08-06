@@ -64,4 +64,9 @@ export default defineConfig({
       ],
     }),
   ],
+  vite: {
+    server: {
+      allowedHosts: ["docs.zenitest.ai"],
+    },
+  },
 });
