@@ -2,7 +2,7 @@
 
 import { ZeniProxyClient } from "./proxyClient";
 import { readdirSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, existsSync } from "fs";
-import { join, resolve } from "path";
+import { join, resolve, basename } from "path";
 import { homedir } from "os";
 import { createInterface } from "readline/promises";
 import { stdin as input, stdout as output } from "process";
@@ -131,9 +131,11 @@ Commands:
   run              Read test cases from a folder and run them via the server
 
 Options:
-  --dir, -d       Directory containing test cases (defaults to zeni_tests)
-  --parallel, -p  Number of test cases to run in parallel (defaults to 5)
-  --help, -h      Show this help message
+  --dir, -d           Directory containing test cases (defaults to zeni_tests)
+  --platform, -t      Platform target to execute: web, ios, android (defaults to all)
+  --bundle, -b        Path to built mobile app binary (.ipa or .apk)
+  --parallel, -p      Number of test cases to run in parallel (defaults to 5)
+  --help, -h          Show this help message
 `);
 }
 
@@ -165,6 +167,9 @@ function parseArgs(args: string[]) {
   if (options.d) options.dir = options.d;
   if (options.p) options.parallel = options.p;
   if (options.c) options.parallel = options.c;
+  if (options.t) options.platform = options.t;
+  if (options.target) options.platform = options.target;
+  if (options.b) options.bundle = options.b;
   if (options.h) options.help = options.h;
 
   return options;
@@ -507,36 +512,17 @@ class LiveReportRenderer {
   }
 }
 
-async function runTests(options: Record<string, any>) {
-  const apiKey = await getApiKey();
-  const dirName = options.dir || "zeni_tests";
-  const dirPath = resolve(process.cwd(), dirName);
-
-  if (!existsSync(dirPath)) {
-    console.error(`\x1b[1;31mError: Directory "${dirPath}" does not exist.\x1b[0m`);
-    process.exit(1);
-  }
-
-  const files = readdirSync(dirPath).filter(
+function loadTestCasesFromDir(targetDir: string): any[] {
+  if (!existsSync(targetDir)) return [];
+  const files = readdirSync(targetDir).filter(
     (file) => file.endsWith(".yaml") || file.endsWith(".yml") || file.endsWith(".json")
   );
-  if (files.length === 0) {
-    console.log(`No test case files (.yaml, .yml, .json) found in "${dirPath}".`);
-    process.exit(0);
-  }
-
   const testCases: any[] = [];
   for (const file of files) {
-    const filePath = join(dirPath, file);
+    const filePath = join(targetDir, file);
     try {
       const content = readFileSync(filePath, "utf-8");
-      let testCase: any;
-      if (file.endsWith(".yaml") || file.endsWith(".yml")) {
-        testCase = parseYaml(content);
-      } else {
-        testCase = JSON.parse(content);
-      }
-
+      let testCase: any = (file.endsWith(".yaml") || file.endsWith(".yml")) ? parseYaml(content) : JSON.parse(content);
       if (testCase && testCase.id && testCase.title && Array.isArray(testCase.steps)) {
         testCase.steps = testCase.steps.map((s: any, idx: number) => {
           if (typeof s === "object" && s !== null) {
@@ -573,132 +559,169 @@ async function runTests(options: Record<string, any>) {
       console.warn(`[CLI Warning] Failed to parse test case "${file}":`, err.message);
     }
   }
+  return testCases;
+}
 
-  if (testCases.length === 0) {
+async function runTests(options: Record<string, any>) {
+  const apiKey = await getApiKey();
+  const dirName = options.dir || "zeni_tests";
+  const dirPath = resolve(process.cwd(), dirName);
+
+  const webDir = join(dirPath, "web");
+  const iosDir = join(dirPath, "mobile-ios");
+  const androidDir = join(dirPath, "mobile-android");
+
+  const filterPlatform = (options.platform || options.target || "").toLowerCase();
+
+  const runWeb = !filterPlatform || filterPlatform === "web";
+  const runIos = !filterPlatform || filterPlatform === "ios" || filterPlatform === "mobile-ios";
+  const runAndroid = !filterPlatform || filterPlatform === "android" || filterPlatform === "mobile-android";
+
+  const webTestCases = (runWeb && existsSync(webDir)) ? loadTestCasesFromDir(webDir) : [];
+  const iosTestCases = (runIos && existsSync(iosDir)) ? loadTestCasesFromDir(iosDir) : [];
+  const androidTestCases = (runAndroid && existsSync(androidDir)) ? loadTestCasesFromDir(androidDir) : [];
+
+  // Fallback to top-level specs if no subfolders exist and web is enabled
+  const rootTestCases = (runWeb && webTestCases.length === 0 && iosTestCases.length === 0 && androidTestCases.length === 0)
+    ? loadTestCasesFromDir(dirPath)
+    : [];
+
+  const allWebTestCases = [...webTestCases, ...rootTestCases];
+  const totalCount = allWebTestCases.length + iosTestCases.length + androidTestCases.length;
+
+  if (totalCount === 0) {
     console.error(`\x1b[1;31mError: No valid test cases found in "${dirPath}".\x1b[0m`);
     process.exit(1);
   }
 
-  const clientId = await fetchServerClientId(apiKey);
-
-  const secrets = loadLocalSecrets(dirPath);
-  const client = new ZeniProxyClient({
-    serverUrl: WS_BASE_URL,
-    clientId,
-    chromePort: 9222,
-    headless: true,
-    secrets,
-  });
+  console.log(`\x1b[1;36m[ZeniTest Suite] Found ${totalCount} test case(s):\x1b[0m`);
+  if (allWebTestCases.length > 0) console.log(` - Web: ${allWebTestCases.length} test(s) in zeni_tests/web/`);
+  if (iosTestCases.length > 0) console.log(` - Mobile iOS: ${iosTestCases.length} test(s) in zeni_tests/mobile-ios/`);
+  if (androidTestCases.length > 0) console.log(` - Mobile Android: ${androidTestCases.length} test(s) in zeni_tests/mobile-android/`);
+  console.log();
 
   let exitCode = 0;
 
-  try {
-    await client.start();
-    console.log(`Found ${testCases.length} test case(s) in "${dirPath}".\n`);
-
-    const renderer = new LiveReportRenderer(testCases);
-    renderer.render();
-
-    const parallel = Number(options.parallel || options.p || options.concurrency || options.c || 5);
-
-    const response = await fetch(`${API_BASE_URL}/api/executions/create`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "Authorization": `Bearer ${apiKey}`,
-        "x-stream": "true",
-      },
-      body: JSON.stringify({
-        clientId,
-        testCases,
-        parallel,
-      }),
+  // 1. Run Web Tests
+  if (allWebTestCases.length > 0) {
+    const clientId = await fetchServerClientId(apiKey);
+    const secrets = loadLocalSecrets(dirPath);
+    const client = new ZeniProxyClient({
+      serverUrl: WS_BASE_URL,
+      clientId,
+      chromePort: 9222,
+      headless: true,
+      secrets,
     });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Server returned error status ${response.status}: ${errText}`);
-    }
+    try {
+      await client.start();
+      const renderer = new LiveReportRenderer(allWebTestCases);
+      renderer.render();
 
-    if (response.body) {
-      const reader = (response.body as ReadableStream<Uint8Array>).getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
+      const parallel = Number(options.parallel || options.p || options.concurrency || options.c || 5);
+      const response = await fetch(`${API_BASE_URL}/api/executions/create`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "Authorization": `Bearer ${apiKey}`,
+          "x-stream": "true",
+        },
+        body: JSON.stringify({ clientId, testCases: allWebTestCases, parallel }),
+      });
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      if (response.ok && response.body) {
+        const reader = (response.body as ReadableStream<Uint8Array>).getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
 
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed) continue;
-          try {
-            const msg = JSON.parse(trimmed);
-            if (msg.type === "init") {
-              renderer.setExecutionId(msg.executionId);
-            } else if (msg.type === "step_progress") {
-              renderer.updateStep(
-                msg.testCaseId,
-                msg.stepIndex,
-                msg.totalSteps,
-                msg.stepType,
-                msg.description
-              );
-            } else if (msg.type === "test_complete") {
-              renderer.completeTest(
-                msg.testCaseId,
-                msg.status,
-                msg.durationMs,
-                msg.error
-              );
-            } else if (msg.type === "execution_complete") {
-              renderer.render(true);
-              exitCode = msg.failedCount > 0 ? 1 : 0;
-            }
-          } catch {}
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            try {
+              const msg = JSON.parse(trimmed);
+              if (msg.type === "init") renderer.setExecutionId(msg.executionId);
+              else if (msg.type === "step_progress") renderer.updateStep(msg.testCaseId, msg.stepIndex, msg.totalSteps, msg.stepType, msg.description);
+              else if (msg.type === "test_complete") renderer.completeTest(msg.testCaseId, msg.status, msg.durationMs, msg.error);
+              else if (msg.type === "execution_complete") {
+                renderer.render(true);
+                if (msg.failedCount > 0) exitCode = 1;
+              }
+            } catch {}
+          }
         }
       }
-
-      if (buffer.trim()) {
-        try {
-          const msg = JSON.parse(buffer.trim());
-          if (msg.type === "init") {
-            renderer.setExecutionId(msg.executionId);
-          } else if (msg.type === "step_progress") {
-            renderer.updateStep(
-              msg.testCaseId,
-              msg.stepIndex,
-              msg.totalSteps,
-              msg.stepType,
-              msg.description
-            );
-          } else if (msg.type === "test_complete") {
-            renderer.completeTest(
-              msg.testCaseId,
-              msg.status,
-              msg.durationMs,
-              msg.error
-            );
-          } else if (msg.type === "execution_complete") {
-            renderer.render(true);
-            exitCode = msg.failedCount > 0 ? 1 : 0;
-          }
-        } catch {}
-      }
+    } finally {
+      client.stop();
     }
-  } catch (err: any) {
-    console.error(`\x1b[1;31mExecution failed: ${err.message}\x1b[0m`);
-    exitCode = 1;
-  } finally {
-    client.stop();
   }
 
-  process.exit(exitCode);
+  // 2. Run Mobile iOS Tests
+  if (iosTestCases.length > 0) {
+    const iosAppPath = options.bundle || options.b || options["app-ios"] || resolve(process.cwd(), "sample-apps/flutter_sample_app/build/ios/ipa/Runner.ipa");
+    console.log(`\n\x1b[1;33m[Mobile iOS Execution] Target binary: ${iosAppPath}\x1b[0m`);
+    if (!existsSync(iosAppPath)) {
+      console.warn(`[Warning] iOS binary not found at ${iosAppPath}. Build Runner.ipa first.`);
+    } else {
+      const secrets = loadLocalSecrets(dirPath);
+      const formData = new FormData();
+      const fileData = readFileSync(iosAppPath);
+      formData.append("appFile", new Blob([fileData]), basename(iosAppPath));
+      formData.append("platform", "mobile-ios");
+      formData.append("testCases", JSON.stringify(iosTestCases));
+      if (secrets.AWS_PROJECT_ARN || process.env.AWS_PROJECT_ARN) {
+        formData.append("awsProjectArn", secrets.AWS_PROJECT_ARN || process.env.AWS_PROJECT_ARN || "");
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/executions/mobile`, {
+        method: "POST",
+        headers: { "x-api-key": apiKey, "Authorization": `Bearer ${apiKey}` },
+        body: formData,
+      });
+      const data: any = await res.json();
+      console.log(`[Mobile iOS Result]:`, data.success ? "PASSED" : "FAILED");
+      if (!data.success) exitCode = 1;
+    }
+  }
+
+  // 3. Run Mobile Android Tests
+  if (androidTestCases.length > 0) {
+    const androidAppPath = options.bundle || options.b || options["app-android"] || resolve(process.cwd(), "sample-apps/flutter_sample_app/build/app/outputs/flutter-apk/app-debug.apk");
+    console.log(`\n\x1b[1;33m[Mobile Android Execution] Target binary: ${androidAppPath}\x1b[0m`);
+    if (!existsSync(androidAppPath)) {
+      console.warn(`[Warning] Android binary not found at ${androidAppPath}. Build app-debug.apk first.`);
+    } else {
+      const secrets = loadLocalSecrets(dirPath);
+      const formData = new FormData();
+      const fileData = readFileSync(androidAppPath);
+      formData.append("appFile", new Blob([fileData]), basename(androidAppPath));
+      formData.append("platform", "mobile-android");
+      formData.append("testCases", JSON.stringify(androidTestCases));
+      if (secrets.AWS_PROJECT_ARN || process.env.AWS_PROJECT_ARN) {
+        formData.append("awsProjectArn", secrets.AWS_PROJECT_ARN || process.env.AWS_PROJECT_ARN || "");
+      }
+
+      const res = await fetch(`${API_BASE_URL}/api/executions/mobile`, {
+        method: "POST",
+        headers: { "x-api-key": apiKey, "Authorization": `Bearer ${apiKey}` },
+        body: formData,
+      });
+      const data: any = await res.json();
+      console.log(`[Mobile Android Result]:`, data.success ? "PASSED" : "FAILED");
+      if (!data.success) exitCode = 1;
+    }
+  }
+
+  if (exitCode !== 0) {
+    process.exit(exitCode);
+  }
 }
 
 async function main() {

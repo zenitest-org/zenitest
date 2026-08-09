@@ -1,9 +1,16 @@
+import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 import { Hono } from "hono";
 import { streamText } from "hono/streaming";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 import { WebSocket } from "ws";
 import { chromium } from "playwright-core";
 import { supabase, uploadScreenshot, attachSignedUrlsToDetails } from "../db/supabase";
 import { Executor } from "../executor";
+import { MobileExecutor, uploadAppBinaryToSupabase } from "../mobile-executor";
 import { TestCase, TestCaseExecutionReport } from "../types";
 import { authMiddleware, AuthUser } from "../middleware/auth";
 
@@ -765,6 +772,203 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         err,
       );
       return c.json({ success: false, error: err.message || String(err) }, 500);
+    }
+  });
+
+  router.post("/mobile", async (c) => {
+    try {
+      const authUser = c.get("user") as AuthUser;
+      const body = await c.req.parseBody();
+
+      let testCases: TestCase[] = [];
+      if (typeof body.testCases === "string") {
+        testCases = JSON.parse(body.testCases);
+      } else if (Array.isArray(body.testCases)) {
+        testCases = body.testCases as unknown as TestCase[];
+      }
+
+      const platform = (body.platform as "mobile-ios" | "mobile-android") || "mobile-ios";
+      const appFile = body.appFile as File | undefined;
+      const appUrlFromReq = body.appUrl as string | undefined;
+      const awsProjectArn = (body.awsProjectArn as string) || process.env.AWS_PROJECT_ARN;
+
+      let signedAppUrl = appUrlFromReq || "";
+      let localSavedPath: string | undefined;
+
+      if (appFile) {
+        const arrayBuffer = await appFile.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+        const uploadDir = join(__dirname, "..", ".cache", "uploads");
+        if (!existsSync(uploadDir)) {
+          mkdirSync(uploadDir, { recursive: true });
+        }
+        localSavedPath = join(uploadDir, `${Date.now()}_${appFile.name}`);
+        writeFileSync(localSavedPath, buffer);
+        signedAppUrl = await uploadAppBinaryToSupabase(buffer, appFile.name);
+      }
+
+      if (!signedAppUrl) {
+        return c.json({ success: false, error: "App binary file or appUrl is required." }, 400);
+      }
+
+      // 1. Create main 'executions' record in Supabase DB
+      let executionRecord: any = null;
+      const { data: createdExec, error: execErr } = await supabase
+        .from("executions")
+        .insert({
+          title: `Mobile Run (${platform})`,
+          environment: platform,
+          status: "running",
+          total_test_cases: testCases.length,
+          passed_test_cases: 0,
+          failed_test_cases: 0,
+          user_id: authUser.id,
+        })
+        .select()
+        .single();
+
+      if (execErr) {
+        console.error("[Mobile DB Warning] Failed to insert initial execution row:", execErr);
+      } else {
+        executionRecord = createdExec;
+        console.log(`[Mobile DB] Created execution record ID: ${executionRecord.id}`);
+      }
+
+      const mobileExecutor = new MobileExecutor(authUser.geminiApiKey);
+      const executionReports: TestCaseExecutionReport[] = [];
+      let passedCount = 0;
+      let failedCount = 0;
+      let totalDurationMs = 0;
+      let totalTokens = 0;
+
+      for (let idx = 0; idx < testCases.length; idx++) {
+        const tc = testCases[idx];
+
+        // 2. Create 'execution_details' record in Supabase DB
+        let detailRecord: any = null;
+        if (executionRecord) {
+          const { data: createdDetail, error: detailErr } = await supabase
+            .from("execution_details")
+            .insert({
+              execution_id: executionRecord.id,
+              test_case_id: tc.id || `tc_${idx}`,
+              title: tc.title || `Mobile Test Case ${idx + 1}`,
+              status: "running",
+              started_at: new Date().toISOString(),
+            })
+            .select()
+            .single();
+
+          if (!detailErr && createdDetail) {
+            detailRecord = createdDetail;
+          }
+        }
+
+        const tcStartTime = Date.now();
+        const report = await mobileExecutor.executeTestCase(tc, {
+          platform,
+          appUrl: signedAppUrl,
+          appFilePath: localSavedPath,
+          awsProjectArn,
+          geminiApiKey: authUser.geminiApiKey,
+        });
+        executionReports.push(report);
+
+        const durationMs = Date.now() - tcStartTime;
+        const isSuccess = report.overallSuccess;
+        if (isSuccess) passedCount++;
+        else failedCount++;
+
+        totalDurationMs += durationMs;
+        totalTokens += report.totalTokensUsed || 0;
+
+        // 3. Upload Step Screenshots to Supabase Storage & Sanitize
+        const processedStepReports: any[] = [];
+        for (const stepReport of report.stepReports || []) {
+          const reportCopy = { ...stepReport };
+          if (reportCopy.screenshotBase64 && executionRecord) {
+            const uploadResult = await uploadScreenshot(
+              executionRecord.id,
+              tc.id || "tc",
+              reportCopy.index,
+              reportCopy.screenshotBase64
+            );
+            if (uploadResult) {
+              reportCopy.screenshotPath = uploadResult.path;
+            }
+            delete reportCopy.screenshotBase64;
+          }
+          processedStepReports.push(reportCopy);
+        }
+
+        const metaItem = {
+          type: "__meta__",
+          networkReports: [],
+          logReports: [],
+          info: {
+            specFile: tc.id ? `${tc.id}.yaml` : "mobile-test.yaml",
+            browser: platform === "mobile-ios" ? "AWS Device Farm (iOS)" : "AWS Device Farm (Android)",
+            duration: `${(durationMs / 1000).toFixed(1)}s`,
+            url: signedAppUrl,
+          },
+        };
+        const processedStepReportsWithMeta = [...processedStepReports, metaItem];
+
+        // 4. Update 'execution_details' record in Supabase DB
+        if (detailRecord) {
+          const updateData: any = sanitizeForJsonb({
+            status: isSuccess ? "passed" : "failed",
+            duration_ms: durationMs,
+            step_reports: processedStepReportsWithMeta,
+            network_reports: [],
+            log_reports: [],
+            info: metaItem.info,
+            completed_at: new Date().toISOString(),
+          });
+
+          const { error: updateErr } = await supabase
+            .from("execution_details")
+            .update(updateData)
+            .eq("id", detailRecord.id);
+
+          if (updateErr) {
+            console.error(`[Mobile DB Warning] Failed to update execution detail ${detailRecord.id}:`, updateErr);
+          } else {
+            console.log(`[Mobile DB] Successfully saved execution details for test case "${tc.title}"`);
+          }
+        }
+      }
+
+      // 5. Update aggregate 'executions' record in Supabase DB
+      if (executionRecord) {
+        const finalStatus = failedCount > 0 ? "failed" : "completed";
+        await supabase
+          .from("executions")
+          .update({
+            status: finalStatus,
+            passed_test_cases: passedCount,
+            failed_test_cases: failedCount,
+            total_duration_ms: totalDurationMs,
+            total_tokens_used: totalTokens,
+            completed_at: new Date().toISOString(),
+          })
+          .eq("id", executionRecord.id);
+
+        console.log(`[Mobile DB] Completed execution record ${executionRecord.id} with status: ${finalStatus}`);
+      }
+
+      return c.json({
+        success: true,
+        data: {
+          executionId: executionRecord?.id,
+          appUrl: signedAppUrl,
+          platform,
+          reports: executionReports,
+        },
+      });
+    } catch (err: any) {
+      console.error("[Mobile Executions Route Error]:", err);
+      return c.json({ success: false, error: err.message }, 500);
     }
   });
 

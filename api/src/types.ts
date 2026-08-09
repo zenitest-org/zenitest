@@ -172,3 +172,22 @@ export interface TestCaseExecutionReport {
   totalTokensUsed: number;
   error?: string;
 }
+
+/* ==================== Mobile Testing Extensions ==================== */
+
+export const AWS_DEVICE_ARN_IOS = "arn:aws:devicefarm:us-west-2::device:6200F380A4874FEB9C72EED72B863B67";
+export const AWS_DEVICE_ARN_ANDROID = "arn:aws:devicefarm:us-west-2::device:3D4CBC528B7D4523941002B86DE919E7";
+
+export type TestTargetPlatform = 'web' | 'mobile-ios' | 'mobile-android';
+
+export interface MobileExecutionOptions {
+  platform: 'mobile-ios' | 'mobile-android';
+  appFilePath?: string;
+  appBuffer?: Buffer;
+  appFileName?: string;
+  appUrl?: string;
+  awsProjectArn?: string;
+  awsRegion?: string;
+  geminiApiKey?: string;
+}
+

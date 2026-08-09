@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { serve, ServerType } from "@hono/node-server";
 import { WebSocketServer, WebSocket } from "ws";
 import { registerRoutes } from "./routes";
+import { startAppiumServer, stopAppiumServer } from "./appium-launcher";
 
 export class ZeniServer {
   private app: Hono;
@@ -146,7 +147,10 @@ export class ZeniServer {
     }
   }
 
-  public start(): Promise<void> {
+  public async start(): Promise<void> {
+    // Launch Appium server concurrently
+    await startAppiumServer();
+
     return new Promise((resolve) => {
       this.server = serve(
         {
@@ -162,7 +166,8 @@ export class ZeniServer {
     });
   }
 
-  public stop(): Promise<void> {
+  public async stop(): Promise<void> {
+    stopAppiumServer();
     return new Promise((resolve, reject) => {
       this.wss.close();
       if (this.server) {

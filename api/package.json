@@ -9,6 +9,7 @@
     "test": "tsx src/test-run.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-device-farm": "^3.700.0",
     "@clerk/backend": "^3.15.0",
     "@google/genai": "^2.14.0",
     "@hono/node-server": "^2.0.11",
@@ -19,6 +20,7 @@
     "openai": "^4.53.0",
     "playwright-core": "^1.61.1",
     "tsx": "^4.16.2",
+    "webdriverio": "^8.24.0",
     "ws": "^8.21.1"
   }
 }
