@@ -3,7 +3,8 @@ import { remote } from "webdriverio";
 import { GoogleGenAI, Type } from "@google/genai";
 import { readFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
-import { dirname, basename } from "path";
+import { dirname, basename, extname } from "path";
+import { createHash } from "crypto";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -12,6 +13,8 @@ import {
   TestCase,
   TestCaseExecutionReport,
   StepExecutionReport,
+  NetworkReportItem,
+  LogReportItem,
   DOMElement,
   ActResult,
   StepResult,
@@ -19,6 +22,7 @@ import {
   AWS_DEVICE_ARN_IOS,
   AWS_DEVICE_ARN_ANDROID,
 } from "./types";
+import { ExecutorCache } from "./executor";
 import {
   DeviceFarmClient,
   CreateRemoteAccessSessionCommand,
@@ -142,7 +146,8 @@ export function extractMobileDom(xmlSource: string): DOMElement[] {
 }
 
 /**
- * Uploads app binary (.apk / .ipa) to Supabase Storage 'apps' bucket and returns a 24-hour signed HTTPS URL.
+ * Uploads app binary (.apk / .ipa) to Supabase Storage 'apps' bucket using checksum deduplication.
+ * Skips re-uploading if an identical build checksum is already stored.
  */
 export async function uploadAppBinaryToSupabase(
   appBufferOrPath: Buffer | string,
@@ -161,8 +166,10 @@ export async function uploadAppBinaryToSupabase(
     fileBuffer = appBufferOrPath;
   }
 
+  const checksum = createHash("sha256").update(fileBuffer).digest("hex");
   const bucketName = "apps";
-  const storagePath = `builds/${Date.now()}_${originalName}`;
+  const targetFileName = `${checksum}_${originalName}`;
+  const storagePath = `builds/${targetFileName}`;
 
   console.log(`[Supabase Storage] Ensuring bucket '${bucketName}' exists...`);
   const { data: buckets } = await supabase.storage.listBuckets();
@@ -170,25 +177,35 @@ export async function uploadAppBinaryToSupabase(
     await supabase.storage.createBucket(bucketName, { public: true });
   }
 
-  console.log(`[Supabase Storage] Uploading ${originalName} (${(fileBuffer.length / (1024 * 1024)).toFixed(2)} MB)...`);
-  const { data, error } = await supabase.storage
+  // Check if binary checksum already exists in Supabase Storage
+  const { data: existingFiles } = await supabase.storage
     .from(bucketName)
-    .upload(storagePath, fileBuffer, {
-      contentType: "application/octet-stream",
-      upsert: true,
-    });
+    .list("builds", { search: targetFileName });
 
-  if (error) {
-    throw new Error(`Failed to upload mobile app binary to Supabase Storage: ${error.message}`);
+  const isAlreadyUploaded = existingFiles && existingFiles.some((f) => f.name === targetFileName);
+
+  if (isAlreadyUploaded) {
+    console.log(`[Supabase Storage Cache HIT ⚡] App binary with checksum ${checksum.substring(0, 12)} already exists. Skipping re-upload!`);
+  } else {
+    console.log(`[Supabase Storage] Uploading ${originalName} (${(fileBuffer.length / (1024 * 1024)).toFixed(2)} MB, checksum: ${checksum.substring(0, 12)})...`);
+    const { error } = await supabase.storage
+      .from(bucketName)
+      .upload(storagePath, fileBuffer, {
+        contentType: "application/octet-stream",
+        upsert: true,
+      });
+
+    if (error) {
+      throw new Error(`Failed to upload mobile app binary to Supabase Storage: ${error.message}`);
+    }
   }
 
-  console.log(`[Supabase Storage] Uploaded to path: ${data.path}`);
   const { data: publicUrlData } = supabase.storage
     .from(bucketName)
     .getPublicUrl(storagePath);
 
   if (publicUrlData?.publicUrl) {
-    console.log(`[Supabase Storage] Public HTTPS App URL: ${publicUrlData.publicUrl}`);
+    console.log(`[Supabase Storage] HTTPS App URL: ${publicUrlData.publicUrl}`);
     return publicUrlData.publicUrl;
   }
 
@@ -269,6 +286,8 @@ export class MobileExecutor {
     return { awsClient, sessionArn, endpoint };
   }
 
+  private cache = new ExecutorCache();
+
   /**
    * Executes a mobile test case using Appium WebdriverIO on AWS Device Farm or Local Driver.
    */
@@ -280,11 +299,25 @@ export class MobileExecutor {
     const startTime = Date.now();
     let totalTokensUsed = 0;
     const stepReports: StepExecutionReport[] = [];
+    const logReports: LogReportItem[] = [];
+    const networkReports: NetworkReportItem[] = [];
 
     console.log(`\n=====================================================================================`);
     console.log(`[MobileExecutor] STARTING TEST CASE: "${testCase.title}" (${testCase.id})`);
     console.log(`[MobileExecutor] Target Platform: ${options.platform}`);
     console.log(`=====================================================================================\n`);
+
+    if (onStepReport) {
+      onStepReport({
+        index: 0,
+        type: "init",
+        description: "Initializing Device...",
+        success: true,
+        explanation: "Provisioning mobile device session",
+        executionTimeMs: 0,
+        tokensUsed: 0,
+      });
+    }
 
     // 1. Mandatory App Binary Upload to Supabase Storage
     let signedAppUrl = options.appUrl || "";
@@ -358,6 +391,7 @@ export class MobileExecutor {
         let actResult: ActResult | undefined;
         let validationResult: StepResult | undefined;
         let screenshotBase64: string | undefined;
+        let stepTokens = 0;
 
         console.log(`\n[MobileExecutor Step ${step.index}/${testCase.steps.length}] [${step.type.toUpperCase()}] ${step.description}`);
 
@@ -373,14 +407,53 @@ export class MobileExecutor {
           if (step.type === "navigate") {
             stepSuccess = true;
             explanation = `App launched with binary URI: ${signedAppUrl}`;
+            await driver.pause(1000).catch(() => {});
+            const postShot = await driver.takeScreenshot().catch(() => null);
+            if (postShot) screenshotBase64 = `data:image/png;base64,${postShot}`;
           } else if (step.type === "act") {
-            actResult = await this.executeActStep(driver, step.description, mobileDom, screenshotBase64);
-            stepSuccess = actResult.action !== "done" || !actResult.reasoning.includes("failed");
-            explanation = actResult.reasoning;
+            const cacheKey = this.cache.generateKey(step.description, mobileDom, options.platform, "mobile-act");
+            const cachedActResult = this.cache.get<ActResult>(cacheKey);
+
+            if (cachedActResult) {
+              console.log(`[MobileExecutor Cache HIT] Reusing cached action for step ${step.index}: ${cachedActResult.action}`);
+              actResult = cachedActResult;
+              stepSuccess = actResult.action !== "done" || !actResult.reasoning.includes("failed");
+              explanation = `${actResult.reasoning} (Cached)`;
+              if (actResult.targetElementId) {
+                await this.performMobileAction(driver, actResult);
+              }
+            } else {
+              const res = await this.executeActStep(driver, step.description, mobileDom, screenshotBase64);
+              actResult = res.actResult;
+              stepTokens = res.tokensUsed;
+              stepSuccess = actResult.action !== "done" || !actResult.reasoning.includes("failed");
+              explanation = actResult.reasoning;
+              this.cache.set(cacheKey, actResult);
+            }
+
+            // Capture post-action screenshot AFTER action execution & UI transition completes
+            await driver.pause(1000).catch(() => {});
+            const postShot = await driver.takeScreenshot().catch(() => null);
+            if (postShot) {
+              screenshotBase64 = `data:image/png;base64,${postShot}`;
+            }
           } else if (step.type === "validate") {
-            validationResult = await this.executeValidateStep(step.description, mobileDom, screenshotBase64);
-            stepSuccess = validationResult.success;
-            explanation = validationResult.explanation;
+            const cacheKey = this.cache.generateKey(step.description, mobileDom, options.platform, "mobile-validate");
+            const cachedValResult = this.cache.get<StepResult>(cacheKey);
+
+            if (cachedValResult) {
+              console.log(`[MobileExecutor Cache HIT] Reusing cached validation for step ${step.index}: success=${cachedValResult.success}`);
+              validationResult = cachedValResult;
+              stepSuccess = validationResult.success;
+              explanation = `${validationResult.explanation} (Cached)`;
+            } else {
+              const res = await this.executeValidateStep(step.description, mobileDom, screenshotBase64);
+              validationResult = res.validationResult;
+              stepTokens = res.tokensUsed;
+              stepSuccess = validationResult.success;
+              explanation = validationResult.explanation;
+              this.cache.set(cacheKey, validationResult);
+            }
           }
         } catch (err: any) {
           stepSuccess = false;
@@ -389,8 +462,9 @@ export class MobileExecutor {
 
         const stepDuration = Date.now() - stepStartTime;
         if (!stepSuccess) overallSuccess = false;
+        totalTokensUsed += stepTokens;
 
-        console.log(`[MobileExecutor Step ${step.index}] ${stepSuccess ? "PASSED ✅" : "FAILED ❌"} (${stepDuration}ms): ${explanation}`);
+        console.log(`[MobileExecutor Step ${step.index}] ${stepSuccess ? "PASSED ✅" : "FAILED ❌"} (${stepDuration}ms, ${stepTokens} tokens): ${explanation}`);
 
         const report: StepExecutionReport = {
           index: step.index,
@@ -401,7 +475,7 @@ export class MobileExecutor {
           actResult,
           validationResult,
           executionTimeMs: stepDuration,
-          tokensUsed: 150,
+          tokensUsed: stepTokens,
           screenshotBase64,
         };
 
@@ -419,13 +493,117 @@ export class MobileExecutor {
         overallSuccess,
         targetURL: signedAppUrl,
         stepReports,
+        networkReports,
+        logReports,
         totalExecutionTimeMs: Date.now() - startTime,
-        totalTokensUsed: stepReports.length * 150,
+        totalTokensUsed,
       };
     } finally {
       console.log(`\n=====================================================================================`);
       console.log(`[MobileExecutor] CLOSING SESSION FOR TEST CASE: "${testCase.title}"`);
       if (driver) {
+        try {
+          const logTypes = await driver.getLogTypes().catch(() => []);
+          let driverLogs: any[] = [];
+          if (logTypes.includes("syslog")) {
+            driverLogs = await driver.getLogs("syslog").catch(() => []);
+          } else if (logTypes.includes("logcat")) {
+            driverLogs = await driver.getLogs("logcat").catch(() => []);
+          } else if (logTypes.includes("server")) {
+            driverLogs = await driver.getLogs("server").catch(() => []);
+          }
+
+          const SYSTEM_DAEMON_PATTERNS = [
+            "testmanagerd",
+            "locationd",
+            "wifid",
+            "backboardd",
+            "kernel()",
+            "kernel[",
+            "WirelessRadioManagerd",
+            "contextstored",
+            "navd",
+            "identityservicesd",
+            "mobileassetd",
+            "mediaserverd",
+            "springboard",
+            "symptomsd",
+            "usernotificationsd",
+            "rapportd",
+            "runningboardd",
+            "sharingd",
+            "systemstatusd",
+            "assetsd",
+            "cloudd",
+            "akd",
+            "passd",
+            "WebDriverAgent",
+            "WDA",
+            "XCTRunner",
+            "appium",
+            "io.appium",
+            "[MobileExecutor]",
+            "ActivityManager",
+            "WindowManager",
+            "InputMethodManager",
+            "UiAutomator",
+            "system_server",
+            "vold",
+            "netd",
+            "surfaceflinger",
+            "ScreenshotRequest",
+            "Taking screenshot",
+            "Preparing screenshot",
+            "Converting image",
+            "Requesting screenshot",
+          ];
+
+          for (const entry of driverLogs.slice(-200)) {
+            const rawMsg = typeof entry === "string" ? entry : entry.message || JSON.stringify(entry);
+            const cleanMsg = rawMsg.replace(/\u0000/g, "").trim();
+            if (!cleanMsg) continue;
+
+            const isDaemonLog = SYSTEM_DAEMON_PATTERNS.some((p) =>
+              cleanMsg.toLowerCase().includes(p.toLowerCase())
+            );
+            if (isDaemonLog) continue;
+
+            const level = (entry.level || "").toLowerCase().includes("err") ? "error" : (entry.level || "").toLowerCase().includes("warn") ? "warn" : "info";
+            logReports.push({
+              id: `l-${logReports.length + 1}`,
+              timestamp: entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString(),
+              level,
+              message: cleanMsg,
+            });
+          }
+
+          if (logTypes.includes("performance")) {
+            const perfLogs = await driver.getLogs("performance").catch(() => []);
+            for (const entry of perfLogs) {
+              try {
+                const message = JSON.parse(entry.message).message;
+                if (message.method === "Network.responseReceived") {
+                  const params = message.params;
+                  const response = params.response;
+                  if (response.url.includes("127.0.0.1:4723") || response.url.includes("wd/hub")) {
+                    continue;
+                  }
+                  networkReports.push({
+                    id: `n-${networkReports.length + 1}`,
+                    method: response.requestHeaders ? "GET" : "POST",
+                    url: response.url,
+                    status: response.status,
+                    time: `${response.responseTime ? Math.round(response.responseTime) : 100}ms`,
+                    requestHeaders: response.requestHeaders || {},
+                    responseHeaders: response.headers || {},
+                    responseBody: null,
+                  });
+                }
+              } catch (_) {}
+            }
+          }
+        } catch (_) {}
+
         try {
           console.log(`[MobileExecutor] Deleting WebdriverIO driver session...`);
           await driver.deleteSession();
@@ -434,6 +612,7 @@ export class MobileExecutor {
           console.log(`[MobileExecutor Warning] Error deleting driver session: ${err.message}`);
         }
       }
+
       if (awsClient && sessionArn) {
         try {
           console.log(`[MobileExecutor] Issuing StopRemoteAccessSessionCommand for AWS session: ${sessionArn}...`);
@@ -447,6 +626,26 @@ export class MobileExecutor {
     }
   }
 
+  private async performMobileAction(driver: any, parsed: ActResult): Promise<void> {
+    if (parsed.action === "click" || parsed.action === "type") {
+      const targetId = String(parsed.targetElementId || "");
+      const elem = await driver.$(`~${targetId}`);
+      if (await elem.isExisting()) {
+        if (parsed.action === "click") {
+          await elem.click();
+        } else if (parsed.action === "type") {
+          await elem.setValue(parsed.text || "");
+        }
+      } else {
+        const textElem = await driver.$(`//*[contains(@name, "${targetId}") or contains(@label, "${targetId}")]`);
+        if (await textElem.isExisting()) {
+          if (parsed.action === "click") await textElem.click();
+          else if (parsed.action === "type") await textElem.setValue(parsed.text || "");
+        }
+      }
+    }
+  }
+
   /**
    * Resolves mobile gesture/action using Gemini LLM with structured response schema.
    */
@@ -455,7 +654,7 @@ export class MobileExecutor {
     instruction: string,
     dom: DOMElement[],
     screenshotBase64?: string
-  ): Promise<ActResult> {
+  ): Promise<{ actResult: ActResult; tokensUsed: number }> {
     const userText = `You are a mobile automation assistant executing a step on an app screen.
 Instruction: "${instruction}"
 
@@ -473,7 +672,7 @@ ${JSON.stringify(dom, null, 2)}`;
       });
     }
 
-    const modelName = process.env.STAGEHAND_MODEL || "gemini-2.5-flash";
+    const modelName = process.env.STAGEHAND_MODEL || process.env.ZENI_MODEL || "gemini-3.5-flash-lite";
     const response = await this.ai.models.generateContent({
       model: modelName,
       contents: [
@@ -491,27 +690,11 @@ ${JSON.stringify(dom, null, 2)}`;
 
     const responseText = (response.text || "{}").replace(/```json\n?|\n?```/g, "").trim();
     const parsed: ActResult = JSON.parse(responseText);
+    const tokensUsed = response.usageMetadata?.totalTokenCount ?? 0;
 
-    if (parsed.action === "click" || parsed.action === "type") {
-      const targetId = String(parsed.targetElementId || "");
-      const elem = await driver.$(`~${targetId}`);
-      if (await elem.isExisting()) {
-        if (parsed.action === "click") {
-          await elem.click();
-        } else if (parsed.action === "type") {
-          await elem.setValue(parsed.text || "");
-        }
-      } else {
-        // Fallback search by text
-        const textElem = await driver.$(`//*[contains(@name, "${targetId}") or contains(@label, "${targetId}")]`);
-        if (await textElem.isExisting()) {
-          if (parsed.action === "click") await textElem.click();
-          else if (parsed.action === "type") await textElem.setValue(parsed.text || "");
-        }
-      }
-    }
+    await this.performMobileAction(driver, parsed);
 
-    return parsed;
+    return { actResult: parsed, tokensUsed };
   }
 
   /**
@@ -521,7 +704,7 @@ ${JSON.stringify(dom, null, 2)}`;
     condition: string,
     dom: DOMElement[],
     screenshotBase64?: string
-  ): Promise<StepResult> {
+  ): Promise<{ validationResult: StepResult; tokensUsed: number }> {
     const userText = `You are a mobile QA validator verifying screen state.
 Condition to verify: "${condition}"
 
@@ -539,7 +722,7 @@ ${JSON.stringify(dom, null, 2)}`;
       });
     }
 
-    const modelName = process.env.STAGEHAND_MODEL || "gemini-2.5-flash";
+    const modelName = process.env.STAGEHAND_MODEL || process.env.ZENI_MODEL || "gemini-3.5-flash-lite";
     const response = await this.ai.models.generateContent({
       model: modelName,
       contents: [
@@ -556,6 +739,13 @@ ${JSON.stringify(dom, null, 2)}`;
     });
 
     const responseText = (response.text || "{}").replace(/```json\n?|\n?```/g, "").trim();
-    return JSON.parse(responseText) as StepResult;
+    const validationResult = JSON.parse(responseText) as StepResult;
+    const tokensUsed = response.usageMetadata?.totalTokenCount ?? 0;
+
+    return { validationResult, tokensUsed };
   }
+}
+
+function parsedTargetId(targetElementId: any): boolean {
+  return targetElementId !== undefined && targetElementId !== null && String(targetElementId).trim() !== "";
 }

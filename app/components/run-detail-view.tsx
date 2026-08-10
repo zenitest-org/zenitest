@@ -16,6 +16,9 @@ import {
   LayersIcon,
   ImageIcon,
   RefreshCwIcon,
+  BugIcon,
+  SparklesIcon,
+  AlertTriangleIcon,
 } from "lucide-react";
 import {
   Accordion,
@@ -27,6 +30,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { PlatformBadge } from "@/components/runs-view";
 
 import {
   Sheet,
@@ -65,6 +69,8 @@ export interface LogItem {
 
 export interface TestCaseInfo {
   specFile: string;
+  platform: string;
+  device?: string;
   browser: string;
   duration: string;
   url: string;
@@ -76,11 +82,18 @@ export interface ScreenshotItem {
   url?: string;
 }
 
+export interface BugAnalysisData {
+  summary: string;
+}
+
 export interface TestCaseData {
   id: string;
   title: string;
   status: "passed" | "failed";
+  platform: string;
   duration: string;
+  analyzed?: boolean;
+  bugAnalysis?: BugAnalysisData | null;
   steps: StepItem[];
   network: NetworkItem[];
   logs: LogItem[];
@@ -93,6 +106,7 @@ const mockTestCases: TestCaseData[] = [
     id: "tc-1",
     title: "TC-01: Verify user login with valid credentials",
     status: "passed",
+    platform: "web",
     duration: "2.4s",
     steps: [
       {
@@ -234,6 +248,7 @@ const mockTestCases: TestCaseData[] = [
     ],
     info: {
       specFile: "tests/e2e/auth.spec.ts",
+      platform: "web",
       browser: "Chromium 124.0",
       duration: "2.4s",
       url: "http://localhost:3000/login",
@@ -250,6 +265,7 @@ const mockTestCases: TestCaseData[] = [
     id: "tc-2",
     title: "TC-02: Checkout cart with promotional discount code",
     status: "passed",
+    platform: "web",
     duration: "3.8s",
     steps: [
       {
@@ -316,6 +332,7 @@ const mockTestCases: TestCaseData[] = [
     ],
     info: {
       specFile: "tests/e2e/checkout.spec.ts",
+      platform: "web",
       browser: "Chromium 124.0",
       duration: "3.8s",
       url: "http://localhost:3000/cart",
@@ -331,6 +348,7 @@ const mockTestCases: TestCaseData[] = [
     id: "tc-3",
     title: "TC-03: Validate credit card decline handling",
     status: "failed",
+    platform: "web",
     duration: "4.1s",
     steps: [
       {
@@ -396,6 +414,7 @@ const mockTestCases: TestCaseData[] = [
     ],
     info: {
       specFile: "tests/e2e/payment.spec.ts",
+      platform: "web",
       browser: "Firefox 125.0",
       duration: "4.1s",
       url: "http://localhost:3000/checkout/payment",
@@ -554,6 +573,13 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
             >
               <LayersIcon className="size-3.5" />
               Steps
+            </TabsTrigger>
+            <TabsTrigger
+              value="bug-analysis"
+              className="rounded-none bg-transparent p-0 h-full text-xs font-semibold border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:text-foreground text-muted-foreground hover:text-foreground shadow-none flex items-center gap-1.5 -mb-px"
+            >
+              <SparklesIcon className="size-3.5" />
+              Analysis
             </TabsTrigger>
             <TabsTrigger
               value="network"
@@ -901,46 +927,125 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
             className="mt-0 h-full flex-1 flex flex-col min-h-0"
           >
             <div className="bg-background px-2 text-xs divide-y divide-border/30 h-full flex-1 overflow-y-auto min-h-0 max-h-[500px]">
-              <div className="flex justify-between p-3">
-                <span className="text-muted-foreground">Spec File:</span>
-                <span className="font-mono font-medium text-foreground">
-                  {tc.info.specFile}
-                </span>
-              </div>
-              <div className="flex justify-between p-3">
-                <span className="text-muted-foreground">Browser:</span>
-                <span className="font-medium text-foreground">
-                  {tc.info.browser}
-                </span>
-              </div>
-              <div className="flex justify-between p-3">
-                <span className="text-muted-foreground">Duration:</span>
-                <span className="font-mono font-medium text-foreground">
-                  {tc.info.duration}
-                </span>
-              </div>
-              <div className="flex justify-between p-3">
-                <span className="text-muted-foreground">URL:</span>
-                <span
-                  className="font-mono font-medium text-foreground truncate max-w-[220px]"
-                  title={tc.info.url}
-                >
-                  {tc.info.url}
-                </span>
-              </div>
+              {(tc.info?.platform || tc.platform || "").toLowerCase() ===
+                "ios" ||
+              (tc.info?.platform || tc.platform || "").toLowerCase() ===
+                "android" ? (
+                <>
+                  <div className="flex justify-between items-center p-3">
+                    <span className="text-muted-foreground">Device:</span>
+                    <span className="font-medium text-foreground">
+                      {tc.info?.device || tc.info?.browser || "AWS Device Farm"}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center p-3">
+                    <span className="text-muted-foreground">Duration:</span>
+                    <span className="font-mono font-medium text-foreground">
+                      {tc.info?.duration || tc.duration}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center p-3">
+                    <span className="text-muted-foreground">Spec File:</span>
+                    <span className="font-mono font-medium text-foreground">
+                      {tc.info?.specFile || `${tc.id}.yaml`}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="flex justify-between items-center p-3">
+                    <span className="text-muted-foreground">Spec File:</span>
+                    <span className="font-mono font-medium text-foreground">
+                      {tc.info?.specFile}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center p-3">
+                    <span className="text-muted-foreground">Platform:</span>
+                    <PlatformBadge
+                      platform={tc.info?.platform || tc.platform || "web"}
+                    />
+                  </div>
+                  <div className="flex justify-between items-center p-3">
+                    <span className="text-muted-foreground">Browser:</span>
+                    <span className="font-medium text-foreground">
+                      {tc.info?.browser}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center p-3">
+                    <span className="text-muted-foreground">Duration:</span>
+                    <span className="font-mono font-medium text-foreground">
+                      {tc.info?.duration}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center p-3">
+                    <span className="text-muted-foreground">URL:</span>
+                    <span
+                      className="font-mono font-medium text-foreground truncate max-w-[220px]"
+                      title={tc.info?.url}
+                    >
+                      {tc.info?.url}
+                    </span>
+                  </div>
+                </>
+              )}
             </div>
+          </TabsContent>
+
+          {/* Bug Analysis Tab */}
+          <TabsContent
+            value="bug-analysis"
+            className="mt-0 h-full flex-1 flex flex-col min-h-0"
+          >
+            {!tc.analyzed ? (
+              <div className="py-12 flex flex-col items-center justify-center space-y-3 text-center px-4 bg-background h-full min-h-[220px]">
+                <RefreshCwIcon className="size-6 animate-spin text-primary" />
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-foreground">
+                    Analyzing...
+                  </p>
+                </div>
+              </div>
+            ) : !tc.bugAnalysis?.summary ? (
+              <div className="py-10 text-center text-xs text-muted-foreground font-mono">
+                No analysis recorded for this test case.
+              </div>
+            ) : (
+              <div className="p-4 text-xs h-full flex-1 overflow-y-auto min-h-0 max-h-[500px]">
+                <div className="relative p-4.5 rounded-xl border border-indigo-500/25 dark:border-indigo-500/35 bg-gradient-to-br from-indigo-50/80 via-background to-purple-50/40 dark:from-indigo-950/30 dark:via-background dark:to-purple-950/20 shadow-sm">
+                  <p className="text-[13px] leading-relaxed font-sans font-medium text-slate-800 dark:text-slate-100 whitespace-pre-wrap">
+                    {tc.bugAnalysis.summary}
+                  </p>
+                </div>
+              </div>
+            )}
           </TabsContent>
         </div>
 
         {/* Right Content Area */}
-        <div className="lg:col-span-3 flex flex-col items-center justify-center bg-muted/10 p-0 overflow-hidden">
+        <div
+          className={cn(
+            "lg:col-span-3 flex flex-col items-center justify-center p-4 overflow-hidden",
+            (tc.info?.platform || tc.platform || "").toLowerCase() === "ios" ||
+              (tc.info?.platform || tc.platform || "").toLowerCase() ===
+                "android"
+              ? "bg-slate-100/80 dark:bg-zinc-900/60"
+              : "bg-muted/10",
+          )}
+        >
           {currentShot ? (
             <div className="relative w-full h-full min-h-[300px] flex items-center justify-center select-none">
               {currentShot.url ? (
                 <img
                   src={currentShot.url}
                   alt={currentShot.title}
-                  className="w-full max-w-full object-contain rounded-none border-none shadow-none"
+                  className={cn(
+                    (tc.info?.platform || tc.platform || "").toLowerCase() ===
+                      "ios" ||
+                      (tc.info?.platform || tc.platform || "").toLowerCase() ===
+                        "android"
+                      ? "max-h-[460px] w-auto max-w-[260px] sm:max-w-[300px] object-contain rounded-2xl border border-border/60 shadow-lg my-2 transition-all"
+                      : "w-full max-w-full max-h-[500px] object-contain rounded-none border-none shadow-none",
+                  )}
                 />
               ) : (
                 <div className="flex flex-col items-center justify-center p-6 text-center">
@@ -1004,6 +1109,14 @@ export function RunDetailView({ runId }: { runId: string }) {
       }
 
       return execJson;
+    },
+    refetchInterval: (query) => {
+      const execData = (query.state.data as any)?.data;
+      const details = execData?.details || [];
+      const hasUnanalyzed = details.some(
+        (d: any) => d.analyzed === false || d.status === "running",
+      );
+      return hasUnanalyzed ? 2000 : false;
     },
     enabled: isSignedIn && !!runId,
   });
@@ -1108,8 +1221,11 @@ export function RunDetailView({ runId }: { runId: string }) {
           ? detail.info
           : metaStep?.info || {};
 
+      const tcPlatform = detail.platform || rawInfo.platform || "web";
+
       const info: TestCaseInfo = {
         specFile: rawInfo.specFile || detail.test_case_id || "test.yaml",
+        platform: tcPlatform,
         browser: rawInfo.browser || "Chromium 124.0",
         duration:
           rawInfo.duration ||
@@ -1126,7 +1242,10 @@ export function RunDetailView({ runId }: { runId: string }) {
         id: detail.id || `tc-${dIdx + 1}`,
         title: detail.title || `TC-${dIdx + 1}: ${detail.test_case_id}`,
         status: detail.status === "passed" ? "passed" : "failed",
+        platform: tcPlatform,
         duration: `${((detail.duration_ms || 0) / 1000).toFixed(1)}s`,
+        analyzed: Boolean(detail.analyzed),
+        bugAnalysis: detail.bug_analysis || null,
         steps,
         network,
         logs,
@@ -1191,6 +1310,8 @@ export function RunDetailView({ runId }: { runId: string }) {
                     Failed
                   </Badge>
                 )}
+
+                {tc.platform && <PlatformBadge platform={tc.platform} />}
 
                 <span className="font-semibold text-xs sm:text-sm text-foreground flex-1 truncate tracking-tight">
                   {tc.title}

@@ -13,6 +13,122 @@ import { Executor } from "../executor";
 import { MobileExecutor, uploadAppBinaryToSupabase } from "../mobile-executor";
 import { TestCase, TestCaseExecutionReport } from "../types";
 import { authMiddleware, AuthUser } from "../middleware/auth";
+import { GoogleGenAI, Type } from "@google/genai";
+
+async function analyzeTestCaseBug(
+  detailId: string,
+  testTitle: string,
+  status: string,
+  stepReports: any[],
+  networkReports: any[],
+  logReports: any[],
+  apiKey?: string
+): Promise<void> {
+  try {
+    const key = apiKey || process.env.GEMINI_API_KEY || "";
+    if (!key) {
+      console.warn(`[BugAnalyzer] Missing GEMINI_API_KEY. Setting default bug_analysis for detail ${detailId}.`);
+      await supabase
+        .from("execution_details")
+        .update({
+          analyzed: true,
+          bug_analysis: {
+            summary: status === "passed" ? "Test case passed successfully." : "Test case failed during execution.",
+          },
+        })
+        .eq("id", detailId);
+      return;
+    }
+
+    const ai = new GoogleGenAI({ apiKey: key });
+    const modelName = process.env.STAGEHAND_MODEL || process.env.ZENI_MODEL || "gemini-3.5-flash-lite";
+
+    const cleanedSteps = (stepReports || [])
+      .filter((s: any) => s.type !== "__meta__")
+      .map((s: any) => ({
+        index: s.index,
+        type: s.type,
+        description: s.description,
+        success: s.success,
+        explanation: s.explanation,
+        error: s.error || s.actResult?.reasoning || s.validationResult?.explanation,
+      }));
+
+    const cleanedNetwork = (networkReports || []).slice(0, 15).map((n: any) => ({
+      method: n.method,
+      url: n.url,
+      status: n.status,
+      time: n.time,
+    }));
+
+    const cleanedLogs = (logReports || []).slice(-20).map((l: any) => ({
+      level: l.level,
+      message: l.message,
+    }));
+
+    const promptText = `You are ZeniTest AI Bug Analyzer. Analyze the following E2E test execution and generate a concise summary explaining why the test passed or failed.
+
+Test Title: "${testTitle}"
+Execution Status: ${status.toUpperCase()}
+
+### Step Execution Reports:
+${JSON.stringify(cleanedSteps, null, 2)}
+
+### Network Traffic Context:
+${JSON.stringify(cleanedNetwork, null, 2)}
+
+### Application & System Logs:
+${JSON.stringify(cleanedLogs, null, 2)}
+
+Provide a concise summary explaining the result and any failure causes.`;
+
+    const BUG_ANALYSIS_SCHEMA = {
+      type: Type.OBJECT,
+      properties: {
+        summary: {
+          type: Type.STRING,
+          description: "Concise summary of the test run result, explaining why it passed or failed based on steps, network calls, and logs.",
+        },
+      },
+      required: ["summary"],
+    };
+
+    const response = await ai.models.generateContent({
+      model: modelName,
+      contents: [{ role: "user", parts: [{ text: promptText }] }],
+      config: {
+        temperature: 0.2,
+        responseMimeType: "application/json",
+        responseSchema: BUG_ANALYSIS_SCHEMA,
+      },
+    });
+
+    const responseText = (response.text || "{}").replace(/```json\n?|\n?```/g, "").trim();
+    const bugAnalysisObj = JSON.parse(responseText);
+
+    await supabase
+      .from("execution_details")
+      .update({
+        analyzed: true,
+        bug_analysis: bugAnalysisObj,
+      })
+      .eq("id", detailId);
+
+    console.log(`[BugAnalyzer ✅] Bug analysis completed and saved for detail ${detailId}`);
+  } catch (err: any) {
+    console.error(`[BugAnalyzer Warning] Error generating bug analysis for detail ${detailId}:`, err);
+    await supabase
+      .from("execution_details")
+      .update({
+        analyzed: true,
+        bug_analysis: {
+          summary: status === "passed" ? "Test case passed." : `Test case failed: ${err.message}`,
+        },
+      })
+      .eq("id", detailId)
+      .catch(() => {});
+  }
+}
 
 async function runConcurrentTasks<T>(
   items: T[],
@@ -58,6 +174,14 @@ function sanitizeForJsonb<T>(obj: T): T {
   return obj;
 }
 
+function normalizePlatform(p?: string): string {
+  if (!p) return "web";
+  const lower = p.toLowerCase().trim();
+  if (lower === "mobile-ios" || lower === "ios") return "ios";
+  if (lower === "mobile-android" || lower === "android") return "android";
+  return "web";
+}
+
 export interface ExecutionsRouteContext {
   clients: Map<string, WebSocket>;
   port: number;
@@ -86,7 +210,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
       let query = supabase
         .from("executions")
         .select(
-          "id, number, title, status, environment, total_test_cases, passed_test_cases, failed_test_cases, skipped_test_cases, total_duration_ms, total_tokens_used, created_at, started_at, completed_at, user_id",
+          "id, number, title, status, environment, platforms, total_test_cases, passed_test_cases, failed_test_cases, skipped_test_cases, total_duration_ms, total_tokens_used, created_at, started_at, completed_at, user_id",
           { count: "exact" }
         )
         .order("created_at", { ascending: false })
@@ -177,6 +301,9 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         clientId,
         title,
         environment = "production",
+        platform: bodyPlatform,
+        platforms: bodyPlatforms,
+        executionId: requestExecutionId,
         testCase,
         testCases: rawTestCases,
         parallel: rawParallel,
@@ -222,32 +349,65 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           ? `Execution: ${testCasesArray[0].title}`
           : `Execution Run ${new Date().toISOString()}`);
 
-      const { data: execution, error: execError } = await supabase
-        .from("executions")
-        .insert({
-          user_id,
-          title: executionTitle,
-          status: testCasesArray.length > 0 ? "running" : "pending",
-          environment,
-          total_test_cases: testCasesArray.length,
-          metadata,
-          started_at: new Date().toISOString(),
-        })
-        .select()
-        .single();
+      const executionPlatforms: string[] = Array.isArray(bodyPlatforms) && bodyPlatforms.length > 0
+        ? bodyPlatforms.map((p: any) => normalizePlatform(String(p)))
+        : [normalizePlatform(bodyPlatform)];
 
-      if (execError || !execution) {
-        console.error(
-          "[Executions Route] Error creating execution record:",
-          execError,
-        );
-        return c.json(
-          {
-            success: false,
-            error: execError?.message || "Failed to create execution",
-          },
-          400,
-        );
+      let execution: any = null;
+      if (requestExecutionId) {
+        const { data: existing } = await supabase
+          .from("executions")
+          .select("*")
+          .eq("id", requestExecutionId)
+          .single();
+
+        if (existing) {
+          execution = existing;
+          const currentPlatforms: string[] = Array.isArray(existing.platforms)
+            ? existing.platforms
+            : [existing.environment || "web"];
+          const mergedPlatforms = Array.from(new Set([...currentPlatforms, ...executionPlatforms]));
+          await supabase
+            .from("executions")
+            .update({
+              platforms: mergedPlatforms,
+              status: "running",
+            })
+            .eq("id", existing.id);
+          execution.platforms = mergedPlatforms;
+        }
+      }
+
+      if (!execution) {
+        const { data: createdExec, error: execError } = await supabase
+          .from("executions")
+          .insert({
+            user_id,
+            title: executionTitle,
+            status: testCasesArray.length > 0 ? "running" : "pending",
+            environment,
+            platforms: executionPlatforms,
+            total_test_cases: testCasesArray.length,
+            metadata,
+            started_at: new Date().toISOString(),
+          })
+          .select()
+          .single();
+
+        if (execError || !createdExec) {
+          console.error(
+            "[Executions Route] Error creating execution record:",
+            execError,
+          );
+          return c.json(
+            {
+              success: false,
+              error: execError?.message || "Failed to create execution",
+            },
+            400,
+          );
+        }
+        execution = createdExec;
       }
 
       if (testCasesArray.length === 0 || !clientId) {
@@ -286,6 +446,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           const executor = new Executor(wsUrl);
 
           await runConcurrentTasks(testCasesArray, parallel, async (tc) => {
+            const tcPlatform = normalizePlatform((tc as any).platform || bodyPlatform);
             const { data: detailRecord } = await supabase
               .from("execution_details")
               .insert({
@@ -293,6 +454,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                 test_case_id: tc.id || `tc_${Date.now()}`,
                 title: tc.title || "Untitled Test Case",
                 status: "running",
+                platform: tcPlatform,
                 target_url: tc.prodURL || tc.localURL || null,
                 started_at: new Date().toISOString(),
               })
@@ -401,6 +563,16 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                   })
                   .eq("id", detailRecord.id);
               }
+
+              analyzeTestCaseBug(
+                detailRecord.id,
+                tc.title || "Untitled Test Case",
+                report.overallSuccess ? "passed" : "failed",
+                processedStepReports,
+                report.networkReports || [],
+                report.logReports || [],
+                authUser.geminiApiKey
+              ).catch((e) => console.error("[BugAnalysis Error]:", e));
             }
 
             await stream.writeln(
@@ -466,6 +638,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
       const executor = new Executor(wsUrl);
 
       await runConcurrentTasks(testCasesArray, parallel, async (tc) => {
+        const tcPlatform = normalizePlatform((tc as any).platform || bodyPlatform);
         const { data: detailRecord, error: detailErr } = await supabase
           .from("execution_details")
           .insert({
@@ -473,6 +646,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             test_case_id: tc.id || `tc_${Date.now()}`,
             title: tc.title || "Untitled Test Case",
             status: "running",
+            platform: tcPlatform,
             target_url: tc.prodURL || tc.localURL || null,
             started_at: new Date().toISOString(),
           })
@@ -559,6 +733,16 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           .from("execution_details")
           .update(updateData)
           .eq("id", detailRecord.id);
+
+        analyzeTestCaseBug(
+          detailRecord.id,
+          tc.title || "Untitled Test Case",
+          isSuccess ? "passed" : "failed",
+          processedStepReports,
+          report.networkReports || [],
+          report.logReports || [],
+          authUser.geminiApiKey
+        ).catch((e) => console.error("[BugAnalysis Error]:", e));
 
         if (updateErr) {
           console.error("[Executions Route] Supabase update warning:", updateErr.message);
@@ -698,6 +882,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         test_case_id,
         title,
         status = "pending",
+        platform: rawPlatform,
         target_url,
         duration_ms = 0,
         tokens_used = 0,
@@ -745,6 +930,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           test_case_id,
           title,
           status,
+          platform: normalizePlatform(rawPlatform),
           target_url,
           duration_ms,
           step_reports: processedStepReports,
@@ -775,6 +961,53 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
     }
   });
 
+  // POST /api/executions/complete - Complete execution and update aggregated metrics
+  router.post("/complete", async (c) => {
+    try {
+      const body = await c.req.json().catch(() => ({}));
+      const { executionId } = body;
+
+      if (!executionId) {
+        return c.json({ success: false, error: "Missing required executionId parameter" }, 400);
+      }
+
+      const { data: details } = await supabase
+        .from("execution_details")
+        .select("status, duration_ms")
+        .eq("execution_id", executionId);
+
+      const detailList = details || [];
+      const passedCount = detailList.filter((d) => d.status === "passed").length;
+      const failedCount = detailList.filter((d) => d.status === "failed").length;
+      const totalCount = detailList.length;
+      const totalDurationMs = detailList.reduce((acc, d) => acc + (d.duration_ms || 0), 0);
+      const overallStatus = failedCount > 0 ? "failed" : "completed";
+
+      const { data: updatedExecution, error } = await supabase
+        .from("executions")
+        .update({
+          status: overallStatus,
+          total_test_cases: totalCount,
+          passed_test_cases: passedCount,
+          failed_test_cases: failedCount,
+          total_duration_ms: totalDurationMs,
+          completed_at: new Date().toISOString(),
+        })
+        .eq("id", executionId)
+        .select()
+        .single();
+
+      if (error) {
+        return c.json({ success: false, error: error.message }, 500);
+      }
+
+      return c.json({ success: true, data: updatedExecution });
+    } catch (err: any) {
+      console.error("[Executions Route] Exception completing execution:", err);
+      return c.json({ success: false, error: err.message || String(err) }, 500);
+    }
+  });
+
   router.post("/mobile", async (c) => {
     try {
       const authUser = c.get("user") as AuthUser;
@@ -787,7 +1020,9 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         testCases = body.testCases as unknown as TestCase[];
       }
 
-      const platform = (body.platform as "mobile-ios" | "mobile-android") || "mobile-ios";
+      const rawPlatform = (body.platform as string) || "ios";
+      const normalizedPlatform = normalizePlatform(rawPlatform);
+      const runnerPlatform: "mobile-ios" | "mobile-android" = normalizedPlatform === "android" ? "mobile-android" : "mobile-ios";
       const appFile = body.appFile as File | undefined;
       const appUrlFromReq = body.appUrl as string | undefined;
       const awsProjectArn = (body.awsProjectArn as string) || process.env.AWS_PROJECT_ARN;
@@ -811,27 +1046,234 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         return c.json({ success: false, error: "App binary file or appUrl is required." }, 400);
       }
 
-      // 1. Create main 'executions' record in Supabase DB
-      let executionRecord: any = null;
-      const { data: createdExec, error: execErr } = await supabase
-        .from("executions")
-        .insert({
-          title: `Mobile Run (${platform})`,
-          environment: platform,
-          status: "running",
-          total_test_cases: testCases.length,
-          passed_test_cases: 0,
-          failed_test_cases: 0,
-          user_id: authUser.id,
-        })
-        .select()
-        .single();
+      const isStream = c.req.header("x-stream") === "true" || c.req.query("stream") === "true";
+      const requestExecutionId = (body.executionId as string) || (body.execution_id as string);
 
-      if (execErr) {
-        console.error("[Mobile DB Warning] Failed to insert initial execution row:", execErr);
-      } else {
-        executionRecord = createdExec;
-        console.log(`[Mobile DB] Created execution record ID: ${executionRecord.id}`);
+      // 1. Create main 'executions' record in Supabase DB (or reuse existing)
+      let executionRecord: any = null;
+      if (requestExecutionId) {
+        const { data: existing } = await supabase
+          .from("executions")
+          .select("*")
+          .eq("id", requestExecutionId)
+          .single();
+
+        if (existing) {
+          executionRecord = existing;
+          const currentPlatforms: string[] = Array.isArray(existing.platforms)
+            ? existing.platforms
+            : [existing.environment || "web"];
+          const mergedPlatforms = Array.from(new Set([...currentPlatforms, normalizedPlatform]));
+          await supabase
+            .from("executions")
+            .update({
+              platforms: mergedPlatforms,
+              status: "running",
+            })
+            .eq("id", existing.id);
+          executionRecord.platforms = mergedPlatforms;
+        }
+      }
+
+      if (!executionRecord) {
+        const { data: createdExec, error: execErr } = await supabase
+          .from("executions")
+          .insert({
+            title: `Mobile Run (${normalizedPlatform})`,
+            environment: normalizedPlatform,
+            platforms: [normalizedPlatform],
+            status: "running",
+            total_test_cases: testCases.length,
+            passed_test_cases: 0,
+            failed_test_cases: 0,
+            user_id: authUser.id,
+          })
+          .select()
+          .single();
+
+        if (execErr) {
+          console.error("[Mobile DB Warning] Failed to insert initial execution row:", execErr);
+        } else {
+          executionRecord = createdExec;
+          console.log(`[Mobile DB] Created execution record ID: ${executionRecord.id}`);
+        }
+      }
+
+      if (isStream) {
+        return streamText(c, async (stream) => {
+          if (executionRecord) {
+            await stream.writeln(JSON.stringify({ type: "init", executionId: executionRecord.id }));
+          }
+
+          const mobileExecutor = new MobileExecutor(authUser.geminiApiKey);
+          let passedCount = 0;
+          let failedCount = 0;
+          let totalDurationMs = 0;
+          let totalTokens = 0;
+
+          for (let idx = 0; idx < testCases.length; idx++) {
+            const tc = testCases[idx];
+
+            let detailRecord: any = null;
+            if (executionRecord) {
+              const { data: createdDetail } = await supabase
+                .from("execution_details")
+                .insert({
+                  execution_id: executionRecord.id,
+                  test_case_id: tc.id || `tc_${idx}`,
+                  title: tc.title || `Mobile Test Case ${idx + 1}`,
+                  status: "running",
+                  platform: normalizedPlatform,
+                  started_at: new Date().toISOString(),
+                })
+                .select()
+                .single();
+              if (createdDetail) detailRecord = createdDetail;
+            }
+
+            await stream.writeln(
+              JSON.stringify({
+                type: "step_progress",
+                testCaseId: tc.id || `tc_${idx}`,
+                title: tc.title || "Untitled",
+                stepIndex: 0,
+                totalSteps: tc.steps?.length || 1,
+                stepType: "INIT",
+                description: "Initializing Device...",
+              })
+            );
+
+            const tcStartTime = Date.now();
+            const report = await mobileExecutor.executeTestCase(
+              tc,
+              {
+                platform: runnerPlatform,
+                appUrl: signedAppUrl,
+                appFilePath: localSavedPath,
+                awsProjectArn,
+                geminiApiKey: authUser.geminiApiKey,
+              },
+              (stepReport) => {
+                stream.writeln(
+                  JSON.stringify({
+                    type: "step_progress",
+                    testCaseId: tc.id || `tc_${idx}`,
+                    title: tc.title || "Untitled",
+                    stepIndex: stepReport.index,
+                    totalSteps: tc.steps?.length || 1,
+                    stepType: stepReport.type,
+                    description: stepReport.description,
+                  })
+                );
+              }
+            );
+
+            const durationMs = Date.now() - tcStartTime;
+            const isSuccess = report.overallSuccess;
+            if (isSuccess) passedCount++;
+            else failedCount++;
+
+            totalDurationMs += durationMs;
+            totalTokens += report.totalTokensUsed || 0;
+
+            const processedStepReports: any[] = [];
+            for (const stepReport of report.stepReports || []) {
+              const reportCopy = { ...stepReport };
+              if (reportCopy.screenshotBase64 && executionRecord) {
+                const uploadResult = await uploadScreenshot(
+                  executionRecord.id,
+                  tc.id || "tc",
+                  reportCopy.index,
+                  reportCopy.screenshotBase64
+                );
+                if (uploadResult) {
+                  reportCopy.screenshotPath = uploadResult.path;
+                }
+                delete reportCopy.screenshotBase64;
+              }
+              processedStepReports.push(reportCopy);
+            }
+
+            const deviceName = runnerPlatform === "mobile-ios" ? "iPhone 15 Pro (iOS)" : "Pixel 8 Pro (Android)";
+            const metaItem = {
+              type: "__meta__",
+              networkReports: report.networkReports || [],
+              logReports: report.logReports || [],
+              info: {
+                specFile: tc.id ? `${tc.id}.yaml` : "mobile-test.yaml",
+                device: deviceName,
+                browser: deviceName,
+                platform: normalizedPlatform,
+                duration: `${(durationMs / 1000).toFixed(1)}s`,
+                url: signedAppUrl,
+              },
+            };
+            const processedStepReportsWithMeta = [...processedStepReports, metaItem];
+
+            if (detailRecord) {
+              const updateData: any = sanitizeForJsonb({
+                status: isSuccess ? "passed" : "failed",
+                duration_ms: durationMs,
+                step_reports: processedStepReportsWithMeta,
+                network_reports: report.networkReports || [],
+                log_reports: report.logReports || [],
+                info: metaItem.info,
+                completed_at: new Date().toISOString(),
+              });
+
+              await supabase
+                .from("execution_details")
+                .update(updateData)
+                .eq("id", detailRecord.id);
+
+              analyzeTestCaseBug(
+                detailRecord.id,
+                tc.title || "Mobile Test Case",
+                isSuccess ? "passed" : "failed",
+                processedStepReports,
+                report.networkReports || [],
+                report.logReports || [],
+                authUser.geminiApiKey
+              ).catch((e) => console.error("[BugAnalysis Error]:", e));
+            }
+
+            await stream.writeln(
+              JSON.stringify({
+                type: "test_complete",
+                testCaseId: tc.id || `tc_${idx}`,
+                title: tc.title || "Untitled",
+                status: isSuccess ? "PASSED" : "FAILED",
+                durationMs,
+                error: report.error,
+              })
+            );
+          }
+
+          if (executionRecord) {
+            const finalStatus = failedCount > 0 ? "failed" : "completed";
+            await supabase
+              .from("executions")
+              .update({
+                status: finalStatus,
+                passed_test_cases: passedCount,
+                failed_test_cases: failedCount,
+                total_duration_ms: totalDurationMs,
+                total_tokens_used: totalTokens,
+                completed_at: new Date().toISOString(),
+              })
+              .eq("id", executionRecord.id);
+          }
+
+          await stream.writeln(
+            JSON.stringify({
+              type: "execution_complete",
+              executionId: executionRecord?.id,
+              passedCount,
+              failedCount,
+              totalDurationMs,
+            })
+          );
+        });
       }
 
       const mobileExecutor = new MobileExecutor(authUser.geminiApiKey);
@@ -854,6 +1296,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
               test_case_id: tc.id || `tc_${idx}`,
               title: tc.title || `Mobile Test Case ${idx + 1}`,
               status: "running",
+              platform: normalizedPlatform,
               started_at: new Date().toISOString(),
             })
             .select()
@@ -866,7 +1309,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
 
         const tcStartTime = Date.now();
         const report = await mobileExecutor.executeTestCase(tc, {
-          platform,
+          platform: runnerPlatform,
           appUrl: signedAppUrl,
           appFilePath: localSavedPath,
           awsProjectArn,
@@ -901,13 +1344,16 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           processedStepReports.push(reportCopy);
         }
 
+        const deviceName = runnerPlatform === "mobile-ios" ? "iPhone 15 Pro (iOS)" : "Pixel 8 Pro (Android)";
         const metaItem = {
           type: "__meta__",
-          networkReports: [],
-          logReports: [],
+          networkReports: report.networkReports || [],
+          logReports: report.logReports || [],
           info: {
             specFile: tc.id ? `${tc.id}.yaml` : "mobile-test.yaml",
-            browser: platform === "mobile-ios" ? "AWS Device Farm (iOS)" : "AWS Device Farm (Android)",
+            device: deviceName,
+            browser: deviceName,
+            platform: normalizedPlatform,
             duration: `${(durationMs / 1000).toFixed(1)}s`,
             url: signedAppUrl,
           },
@@ -920,8 +1366,8 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             status: isSuccess ? "passed" : "failed",
             duration_ms: durationMs,
             step_reports: processedStepReportsWithMeta,
-            network_reports: [],
-            log_reports: [],
+            network_reports: report.networkReports || [],
+            log_reports: report.logReports || [],
             info: metaItem.info,
             completed_at: new Date().toISOString(),
           });
@@ -930,6 +1376,16 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             .from("execution_details")
             .update(updateData)
             .eq("id", detailRecord.id);
+
+          analyzeTestCaseBug(
+            detailRecord.id,
+            tc.title || "Mobile Test Case",
+            isSuccess ? "passed" : "failed",
+            processedStepReports,
+            report.networkReports || [],
+            report.logReports || [],
+            authUser.geminiApiKey
+          ).catch((e) => console.error("[BugAnalysis Error]:", e));
 
           if (updateErr) {
             console.error(`[Mobile DB Warning] Failed to update execution detail ${detailRecord.id}:`, updateErr);

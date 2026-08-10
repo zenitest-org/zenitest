@@ -131,7 +131,7 @@ Commands:
   run              Read test cases from a folder and run them via the server
 
 Options:
-  --dir, -d           Directory containing test cases (defaults to zeni_tests)
+  --dir, -d           Directory containing test cases (defaults to zenitests)
   --platform, -t      Platform target to execute: web, ios, android (defaults to all)
   --bundle, -b        Path to built mobile app binary (.ipa or .apk)
   --parallel, -p      Number of test cases to run in parallel (defaults to 5)
@@ -354,6 +354,7 @@ async function runTestCase(testCase: any, apiKey: string) {
 
 interface LiveTestCaseState {
   id: string;
+  platform: string;
   title: string;
   status: "⏳ PENDING" | "🏃 RUNNING" | "✅ PASSED" | "❌ FAILED";
   currentStep: string;
@@ -395,10 +396,13 @@ class LiveReportRenderer {
   private rows: Map<string, LiveTestCaseState> = new Map();
   private lastLineCount: number = 0;
 
-  constructor(testCases: { id: string; title: string }[]) {
+  constructor(testCases: { id: string; title: string; platform?: string }[]) {
     for (const tc of testCases) {
+      const p = (tc.platform || "web").toLowerCase();
+      const platformDisplay = p === "ios" ? "iOS" : p === "android" ? "Android" : "Web";
       this.rows.set(tc.id, {
         id: tc.id,
+        platform: platformDisplay,
         title: tc.title,
         status: "⏳ PENDING",
         currentStep: "Queued",
@@ -416,8 +420,12 @@ class LiveReportRenderer {
     const row = this.rows.get(testCaseId);
     if (row) {
       row.status = "🏃 RUNNING";
-      const shortDesc = description.length > 60 ? description.slice(0, 57) + "..." : description;
-      row.currentStep = `[${stepIndex}/${totalSteps}] ${stepType.toUpperCase()}: ${shortDesc}`;
+      if (stepIndex === 0 || stepType.toUpperCase() === "INIT") {
+        row.currentStep = description || "Initializing Device...";
+      } else {
+        const shortDesc = description.length > 60 ? description.slice(0, 57) + "..." : description;
+        row.currentStep = `[${stepIndex}/${totalSteps}] ${stepType.toUpperCase()}: ${shortDesc}`;
+      }
     }
     this.render();
   }
@@ -452,17 +460,17 @@ class LiveReportRenderer {
     }
 
     const idHeader = "Test Case ID";
+    const platformHeader = "Platform";
     const titleHeader = "Title";
     const statusHeader = "Status";
     const stepHeader = "Current Step";
-    const durationHeader = "Duration";
 
     const rowList = Array.from(this.rows.values());
     const maxIdLen = 14;
-    const maxTitleLen = 26;
+    const maxPlatformLen = 8;
+    const maxTitleLen = 24;
     const maxStatusLen = 10;
-    const maxDurationLen = 9;
-    const fixedWidths = maxIdLen + maxTitleLen + maxStatusLen + maxDurationLen + 16;
+    const fixedWidths = maxIdLen + maxPlatformLen + maxTitleLen + maxStatusLen + 16;
     const maxStepLen = Math.max(30, termWidth - fixedWidths);
 
     const padTrunc = (str: string, len: number) => {
@@ -473,8 +481,8 @@ class LiveReportRenderer {
       return str + " ".repeat(len - vis);
     };
 
-    const headerRow = `| ${padTrunc(idHeader, maxIdLen)} | ${padTrunc(titleHeader, maxTitleLen)} | ${padTrunc(statusHeader, maxStatusLen)} | ${padTrunc(stepHeader, maxStepLen)} | ${padTrunc(durationHeader, maxDurationLen)} |`;
-    const sep = `|-${"-".repeat(maxIdLen)}-|-` + `${"-".repeat(maxTitleLen)}-|-` + `${"-".repeat(maxStatusLen)}-|-` + `${"-".repeat(maxStepLen)}-|-` + `${"-".repeat(maxDurationLen)}-|`;
+    const headerRow = `| ${padTrunc(idHeader, maxIdLen)} | ${padTrunc(platformHeader, maxPlatformLen)} | ${padTrunc(titleHeader, maxTitleLen)} | ${padTrunc(statusHeader, maxStatusLen)} | ${padTrunc(stepHeader, maxStepLen)} |`;
+    const sep = `|-${"-".repeat(maxIdLen)}-|-` + `${"-".repeat(maxPlatformLen)}-|-` + `${"-".repeat(maxTitleLen)}-|-` + `${"-".repeat(maxStatusLen)}-|-` + `${"-".repeat(maxStepLen)}-|`;
 
     lines.push(headerRow);
     lines.push(sep);
@@ -486,8 +494,7 @@ class LiveReportRenderer {
       else if (r.status === "🏃 RUNNING") statusFormatted = "\x1b[1;33m🏃 RUNNING\x1b[0m";
       else statusFormatted = "\x1b[1;30m⏳ PENDING\x1b[0m";
 
-      const durationText = `${r.durationMs} ms`;
-      lines.push(`| ${padTrunc(r.id, maxIdLen)} | ${padTrunc(r.title, maxTitleLen)} | ${padTrunc(statusFormatted, maxStatusLen)} | ${padTrunc(r.currentStep, maxStepLen)} | ${padTrunc(durationText, maxDurationLen)} |`);
+      lines.push(`| ${padTrunc(r.id, maxIdLen)} | ${padTrunc(r.platform, maxPlatformLen)} | ${padTrunc(r.title, maxTitleLen)} | ${padTrunc(statusFormatted, maxStatusLen)} | ${padTrunc(r.currentStep, maxStepLen)} |`);
     }
 
     lines.push(dashBorder);
@@ -564,30 +571,38 @@ function loadTestCasesFromDir(targetDir: string): any[] {
 
 async function runTests(options: Record<string, any>) {
   const apiKey = await getApiKey();
-  const dirName = options.dir || "zeni_tests";
+  const dirName = options.dir || "zenitests";
   const dirPath = resolve(process.cwd(), dirName);
 
   const webDir = join(dirPath, "web");
-  const iosDir = join(dirPath, "mobile-ios");
-  const androidDir = join(dirPath, "mobile-android");
+  const iosDir = existsSync(join(dirPath, "ios")) ? join(dirPath, "ios") : join(dirPath, "mobile-ios");
+  const androidDir = existsSync(join(dirPath, "android")) ? join(dirPath, "android") : join(dirPath, "mobile-android");
 
   const filterPlatform = (options.platform || options.target || "").toLowerCase();
+  const selectedPlatforms = filterPlatform ? filterPlatform.split(",").map((p) => p.trim()).filter(Boolean) : [];
 
-  const runWeb = !filterPlatform || filterPlatform === "web";
-  const runIos = !filterPlatform || filterPlatform === "ios" || filterPlatform === "mobile-ios";
-  const runAndroid = !filterPlatform || filterPlatform === "android" || filterPlatform === "mobile-android";
+  const runWeb = selectedPlatforms.length === 0 || selectedPlatforms.some((p) => p === "web");
+  const runIos = selectedPlatforms.length === 0 || selectedPlatforms.some((p) => p === "ios" || p === "mobile-ios");
+  const runAndroid = selectedPlatforms.length === 0 || selectedPlatforms.some((p) => p === "android" || p === "mobile-android");
 
-  const webTestCases = (runWeb && existsSync(webDir)) ? loadTestCasesFromDir(webDir) : [];
-  const iosTestCases = (runIos && existsSync(iosDir)) ? loadTestCasesFromDir(iosDir) : [];
-  const androidTestCases = (runAndroid && existsSync(androidDir)) ? loadTestCasesFromDir(androidDir) : [];
+  const rawWebTestCases = (runWeb && existsSync(webDir)) ? loadTestCasesFromDir(webDir) : [];
+  const iosTestCases = (runIos && existsSync(iosDir)) ? loadTestCasesFromDir(iosDir).map((tc) => ({ ...tc, platform: "ios" })) : [];
+  const androidTestCases = (runAndroid && existsSync(androidDir)) ? loadTestCasesFromDir(androidDir).map((tc) => ({ ...tc, platform: "android" })) : [];
 
   // Fallback to top-level specs if no subfolders exist and web is enabled
-  const rootTestCases = (runWeb && webTestCases.length === 0 && iosTestCases.length === 0 && androidTestCases.length === 0)
+  const rootTestCases = (runWeb && rawWebTestCases.length === 0 && iosTestCases.length === 0 && androidTestCases.length === 0)
     ? loadTestCasesFromDir(dirPath)
     : [];
 
-  const allWebTestCases = [...webTestCases, ...rootTestCases];
-  const totalCount = allWebTestCases.length + iosTestCases.length + androidTestCases.length;
+  const allWebTestCases = [...rawWebTestCases, ...rootTestCases].map((tc) => ({ ...tc, platform: "web" }));
+
+  const combinedPlatforms: string[] = [];
+  if (allWebTestCases.length > 0) combinedPlatforms.push("web");
+  if (iosTestCases.length > 0) combinedPlatforms.push("ios");
+  if (androidTestCases.length > 0) combinedPlatforms.push("android");
+
+  const combinedTestCases = [...allWebTestCases, ...iosTestCases, ...androidTestCases];
+  const totalCount = combinedTestCases.length;
 
   if (totalCount === 0) {
     console.error(`\x1b[1;31mError: No valid test cases found in "${dirPath}".\x1b[0m`);
@@ -595,10 +610,39 @@ async function runTests(options: Record<string, any>) {
   }
 
   console.log(`\x1b[1;36m[ZeniTest Suite] Found ${totalCount} test case(s):\x1b[0m`);
-  if (allWebTestCases.length > 0) console.log(` - Web: ${allWebTestCases.length} test(s) in zeni_tests/web/`);
-  if (iosTestCases.length > 0) console.log(` - Mobile iOS: ${iosTestCases.length} test(s) in zeni_tests/mobile-ios/`);
-  if (androidTestCases.length > 0) console.log(` - Mobile Android: ${androidTestCases.length} test(s) in zeni_tests/mobile-android/`);
+  if (allWebTestCases.length > 0) console.log(` - Web: ${allWebTestCases.length} test(s) in ${dirName}/web/`);
+  if (iosTestCases.length > 0) console.log(` - Mobile iOS: ${iosTestCases.length} test(s) in ${dirName}/ios/`);
+  if (androidTestCases.length > 0) console.log(` - Mobile Android: ${androidTestCases.length} test(s) in ${dirName}/android/`);
   console.log();
+
+  let executionId: string | undefined;
+  try {
+    const initRes = await fetch(`${API_BASE_URL}/api/executions/create`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        title: `Suite Run (${combinedPlatforms.join(", ")})`,
+        platforms: combinedPlatforms,
+        total_test_cases: totalCount,
+      }),
+    });
+    if (initRes.ok) {
+      const initData = await initRes.json();
+      if (initData.success && initData.data?.id) {
+        executionId = initData.data.id;
+      }
+    }
+  } catch (_) {}
+
+  const renderer = new LiveReportRenderer(combinedTestCases);
+  if (executionId) {
+    renderer.setExecutionId(executionId);
+  }
+  renderer.render();
 
   let exitCode = 0;
 
@@ -616,9 +660,6 @@ async function runTests(options: Record<string, any>) {
 
     try {
       await client.start();
-      const renderer = new LiveReportRenderer(allWebTestCases);
-      renderer.render();
-
       const parallel = Number(options.parallel || options.p || options.concurrency || options.c || 5);
       const response = await fetch(`${API_BASE_URL}/api/executions/create`, {
         method: "POST",
@@ -628,7 +669,7 @@ async function runTests(options: Record<string, any>) {
           "Authorization": `Bearer ${apiKey}`,
           "x-stream": "true",
         },
-        body: JSON.stringify({ clientId, testCases: allWebTestCases, parallel }),
+        body: JSON.stringify({ executionId, clientId, testCases: allWebTestCases, parallel, platform: "web", platforms: ["web"] }),
       });
 
       if (response.ok && response.body) {
@@ -647,11 +688,13 @@ async function runTests(options: Record<string, any>) {
             if (!trimmed) continue;
             try {
               const msg = JSON.parse(trimmed);
-              if (msg.type === "init") renderer.setExecutionId(msg.executionId);
+              if (msg.type === "init" && !executionId) {
+                executionId = msg.executionId;
+                renderer.setExecutionId(msg.executionId);
+              }
               else if (msg.type === "step_progress") renderer.updateStep(msg.testCaseId, msg.stepIndex, msg.totalSteps, msg.stepType, msg.description);
               else if (msg.type === "test_complete") renderer.completeTest(msg.testCaseId, msg.status, msg.durationMs, msg.error);
               else if (msg.type === "execution_complete") {
-                renderer.render(true);
                 if (msg.failedCount > 0) exitCode = 1;
               }
             } catch {}
@@ -666,7 +709,6 @@ async function runTests(options: Record<string, any>) {
   // 2. Run Mobile iOS Tests
   if (iosTestCases.length > 0) {
     const iosAppPath = options.bundle || options.b || options["app-ios"] || resolve(process.cwd(), "sample-apps/flutter_sample_app/build/ios/ipa/Runner.ipa");
-    console.log(`\n\x1b[1;33m[Mobile iOS Execution] Target binary: ${iosAppPath}\x1b[0m`);
     if (!existsSync(iosAppPath)) {
       console.warn(`[Warning] iOS binary not found at ${iosAppPath}. Build Runner.ipa first.`);
     } else {
@@ -674,27 +716,61 @@ async function runTests(options: Record<string, any>) {
       const formData = new FormData();
       const fileData = readFileSync(iosAppPath);
       formData.append("appFile", new Blob([fileData]), basename(iosAppPath));
-      formData.append("platform", "mobile-ios");
+      formData.append("platform", "ios");
       formData.append("testCases", JSON.stringify(iosTestCases));
+      if (executionId) formData.append("executionId", executionId);
       if (secrets.AWS_PROJECT_ARN || process.env.AWS_PROJECT_ARN) {
         formData.append("awsProjectArn", secrets.AWS_PROJECT_ARN || process.env.AWS_PROJECT_ARN || "");
       }
 
       const res = await fetch(`${API_BASE_URL}/api/executions/mobile`, {
         method: "POST",
-        headers: { "x-api-key": apiKey, "Authorization": `Bearer ${apiKey}` },
+        headers: {
+          "x-api-key": apiKey,
+          "Authorization": `Bearer ${apiKey}`,
+          "x-stream": "true",
+        },
         body: formData,
       });
-      const data: any = await res.json();
-      console.log(`[Mobile iOS Result]:`, data.success ? "PASSED" : "FAILED");
-      if (!data.success) exitCode = 1;
+
+      if (res.ok && res.body) {
+        const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            try {
+              const msg = JSON.parse(trimmed);
+              if (msg.type === "init" && !executionId) {
+                executionId = msg.executionId;
+                renderer.setExecutionId(msg.executionId);
+              }
+              else if (msg.type === "step_progress") renderer.updateStep(msg.testCaseId, msg.stepIndex, msg.totalSteps, msg.stepType, msg.description);
+              else if (msg.type === "test_complete") renderer.completeTest(msg.testCaseId, msg.status, msg.durationMs);
+              else if (msg.type === "execution_complete") {
+                if (msg.failedCount > 0) exitCode = 1;
+              }
+            } catch {}
+          }
+        }
+      } else {
+        const data: any = await res.json().catch(() => ({}));
+        if (!data.success) exitCode = 1;
+      }
     }
   }
 
   // 3. Run Mobile Android Tests
   if (androidTestCases.length > 0) {
     const androidAppPath = options.bundle || options.b || options["app-android"] || resolve(process.cwd(), "sample-apps/flutter_sample_app/build/app/outputs/flutter-apk/app-debug.apk");
-    console.log(`\n\x1b[1;33m[Mobile Android Execution] Target binary: ${androidAppPath}\x1b[0m`);
     if (!existsSync(androidAppPath)) {
       console.warn(`[Warning] Android binary not found at ${androidAppPath}. Build app-debug.apk first.`);
     } else {
@@ -702,22 +778,73 @@ async function runTests(options: Record<string, any>) {
       const formData = new FormData();
       const fileData = readFileSync(androidAppPath);
       formData.append("appFile", new Blob([fileData]), basename(androidAppPath));
-      formData.append("platform", "mobile-android");
+      formData.append("platform", "android");
       formData.append("testCases", JSON.stringify(androidTestCases));
+      if (executionId) formData.append("executionId", executionId);
       if (secrets.AWS_PROJECT_ARN || process.env.AWS_PROJECT_ARN) {
         formData.append("awsProjectArn", secrets.AWS_PROJECT_ARN || process.env.AWS_PROJECT_ARN || "");
       }
 
       const res = await fetch(`${API_BASE_URL}/api/executions/mobile`, {
         method: "POST",
-        headers: { "x-api-key": apiKey, "Authorization": `Bearer ${apiKey}` },
+        headers: {
+          "x-api-key": apiKey,
+          "Authorization": `Bearer ${apiKey}`,
+          "x-stream": "true",
+        },
         body: formData,
       });
-      const data: any = await res.json();
-      console.log(`[Mobile Android Result]:`, data.success ? "PASSED" : "FAILED");
-      if (!data.success) exitCode = 1;
+
+      if (res.ok && res.body) {
+        const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed) continue;
+            try {
+              const msg = JSON.parse(trimmed);
+              if (msg.type === "init" && !executionId) {
+                executionId = msg.executionId;
+                renderer.setExecutionId(msg.executionId);
+              }
+              else if (msg.type === "step_progress") renderer.updateStep(msg.testCaseId, msg.stepIndex, msg.totalSteps, msg.stepType, msg.description);
+              else if (msg.type === "test_complete") renderer.completeTest(msg.testCaseId, msg.status, msg.durationMs);
+              else if (msg.type === "execution_complete") {
+                if (msg.failedCount > 0) exitCode = 1;
+              }
+            } catch {}
+          }
+        }
+      } else {
+        const data: any = await res.json().catch(() => ({}));
+        if (!data.success) exitCode = 1;
+      }
     }
   }
+
+  if (executionId) {
+    try {
+      await fetch(`${API_BASE_URL}/api/executions/complete`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ executionId }),
+      });
+    } catch (_) {}
+  }
+
+  renderer.render(true);
 
   if (exitCode !== 0) {
     process.exit(exitCode);

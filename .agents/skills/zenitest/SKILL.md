@@ -11,7 +11,7 @@ This skill describes how to write ZeniTest automated test cases in the simplifie
 
 ## 1. Test Case YAML Specification
 
-Test cases are defined as YAML files stored in the `zeni_tests/` directory (or a custom directory passed to the CLI).
+Test cases are defined as YAML files stored in the `zenitests/` directory (subfolders: `web/`, `ios/`, `android/` or a custom directory passed to the CLI).
 
 ### Root Attributes
 
@@ -49,7 +49,7 @@ Each item under `steps` must use one of the simplified action keys with a blank 
 
 ---
 
-### Example Test Case (`zeni_tests/tc_saucedemo_login.yaml`)
+### Example Test Case (`zenitests/web/tc_saucedemo_login.yaml`)
 
 ```yaml
 id: tc_saucedemo_login
@@ -101,7 +101,7 @@ zenitest run [options]
 ```
 
 **Options:**
-- `--dir, -d <directory>`: Folder containing `.yaml` test files (default: `zeni_tests`).
+- `--dir, -d <directory>`: Folder containing `.yaml` test files (default: `zenitests`).
 - `--parallel, -p <count>`: Number of test cases to run concurrently (default: `5`).
 - `--help, -h`: Display CLI help screen.
 
@@ -109,7 +109,7 @@ zenitest run [options]
 
 ### Step-by-Step Execution Workflow
 
-1. **Create Test File**: Save your `.yaml` file inside `zeni_tests/`.
+1. **Create Test File**: Save your `.yaml` file inside `zenitests/web/`, `zenitests/ios/`, or `zenitests/android/`.
 2. **Set Secrets (Optional)**: Store secret keys in `secrets.yaml` or `credentials.yaml` in the working directory:
    ```yaml
    secrets:
@@ -117,5 +117,5 @@ zenitest run [options]
    ```
 3. **Execute Test Cases**:
    ```bash
-   zenitest run --dir zeni_tests --parallel 2
+   zenitest run --dir zenitests --parallel 2
    ```

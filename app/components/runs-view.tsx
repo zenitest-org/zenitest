@@ -4,6 +4,7 @@ import { useState, Suspense } from "react";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@clerk/nextjs";
+import { cn } from "@/lib/utils";
 import {
   CheckCircle2Icon,
   XCircleIcon,
@@ -12,6 +13,8 @@ import {
   ChevronDownIcon,
   RocketIcon,
   BookOpenIcon,
+  GlobeIcon,
+  SmartphoneIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -40,10 +43,53 @@ interface RunItem {
   number?: number;
   suite: string;
   status: RunStatus;
+  platforms: string[];
   tests: { passed: number; total: number };
   duration: string;
   timestamp: string;
   triggeredBy: string;
+}
+
+export function PlatformBadge({ platform }: { platform: string }) {
+  const norm = platform.toLowerCase().trim();
+  if (norm === "web") {
+    return (
+      <Badge
+        variant="outline"
+        className="bg-sky-50 text-sky-700 border-sky-300 gap-1 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-700 font-normal text-[11px]"
+      >
+        <GlobeIcon className="size-3" />
+        Web
+      </Badge>
+    );
+  }
+  if (norm === "ios") {
+    return (
+      <Badge
+        variant="outline"
+        className="bg-purple-50 text-purple-700 border-purple-300 gap-1 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-700 font-normal text-[11px]"
+      >
+        <SmartphoneIcon className="size-3" />
+        iOS
+      </Badge>
+    );
+  }
+  if (norm === "android") {
+    return (
+      <Badge
+        variant="outline"
+        className="bg-emerald-50 text-emerald-700 border-emerald-300 gap-1 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-700 font-normal text-[11px]"
+      >
+        <SmartphoneIcon className="size-3" />
+        Android
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant="outline" className="font-normal text-[11px]">
+      {platform}
+    </Badge>
+  );
 }
 
 function formatDuration(ms: number): string {
@@ -130,6 +176,9 @@ function RunsTable() {
     number: item.number,
     suite: item.title || `Execution #${item.number || item.id.substring(0, 6)}`,
     status: item.status === "completed" || item.status === "passed" ? "passed" : item.status === "failed" || item.status === "cancelled" ? "failed" : "running",
+    platforms: Array.isArray(item.platforms) && item.platforms.length > 0
+      ? item.platforms
+      : [item.environment || "web"],
     tests: {
       passed: item.passed_test_cases || 0,
       total: item.total_test_cases || 0,
@@ -183,6 +232,7 @@ function RunsTable() {
                 <tr>
                   <th className="px-6 py-3 font-semibold">Run ID</th>
                   <th className="px-6 py-3 font-semibold">Status</th>
+                  <th className="px-6 py-3 font-semibold">Platforms</th>
                   <th className="px-6 py-3 font-semibold">Passed</th>
                   <th className="px-6 py-3 font-semibold">Duration</th>
                   <th className="px-6 py-3 font-semibold">Time</th>
@@ -191,14 +241,14 @@ function RunsTable() {
               <tbody className="divide-y">
                 {isLoading ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-8 text-center text-muted-foreground text-xs">
+                    <td colSpan={6} className="px-6 py-8 text-center text-muted-foreground text-xs">
                       <RefreshCwIcon className="size-4 animate-spin mx-auto mb-2" />
                       Loading executions...
                     </td>
                   </tr>
                 ) : filteredRuns.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="px-6 py-12 text-center">
+                    <td colSpan={6} className="px-6 py-12 text-center">
                       <div className="flex flex-col items-center justify-center max-w-sm mx-auto space-y-3">
                         <div className="size-10 rounded-full bg-muted/60 flex items-center justify-center text-muted-foreground border border-border/40">
                           <RocketIcon className="size-5" />
@@ -236,8 +286,16 @@ function RunsTable() {
                   filteredRuns.map((run) => (
                     <tr
                       key={run.id}
-                      className="hover:bg-muted/40 transition-colors cursor-pointer"
-                      onClick={() => router.push(`/runs/${run.id}`)}
+                      className={cn(
+                        "transition-colors",
+                        run.status === "running"
+                          ? "cursor-not-allowed opacity-80 select-none"
+                          : "hover:bg-muted/40 cursor-pointer"
+                      )}
+                      onClick={() => {
+                        if (run.status === "running") return;
+                        router.push(`/runs/${run.id}`);
+                      }}
                     >
                       <td className="px-6 py-4 font-medium text-foreground">
                         <span className="font-mono text-xs font-semibold text-foreground">
@@ -272,6 +330,13 @@ function RunsTable() {
                             Running
                           </Badge>
                         )}
+                      </td>
+                      <td className="px-6 py-4 text-muted-foreground text-xs">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {run.platforms.map((plat) => (
+                            <PlatformBadge key={plat} platform={plat} />
+                          ))}
+                        </div>
                       </td>
                       <td className="px-6 py-4 font-mono text-xs text-muted-foreground">
                         {run.tests.passed} / {run.tests.total}

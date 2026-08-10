@@ -62,7 +62,7 @@ description: Instructions for generating and maintaining ZeniTest YAML test case
 
 ## 1. Test Case YAML Format
 
-Save test files in `zeni_tests/*.yaml`.
+Save test files in `zenitests/web/*.yaml`, `zenitests/ios/*.yaml`, or `zenitests/android/*.yaml`.
 
 ### Required Fields
 - `id`: Unique identifier (e.g. `tc_login_001`)
@@ -81,7 +81,7 @@ Save test files in `zeni_tests/*.yaml`.
 
 To run tests:
 ```bash
-zenitest run --dir zeni_tests
+zenitest run --dir zenitests
 ```
 ````
 
@@ -98,7 +98,7 @@ Once the skill is installed, simply type `/zenitest` followed by your prompt in 
 
 ### 2. Update Existing Tests During Refactoring
 ```text
-/zenitest We updated the login button label from 'Login' to 'Sign In'. Please update our test suite in zeni_tests/
+/zenitest We updated the login button label from 'Login' to 'Sign In'. Please update our test suite in zenitests/
 ```
 
 ### 3. Run & Self-Heal Test Suites

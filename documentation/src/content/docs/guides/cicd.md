@@ -34,5 +34,5 @@ jobs:
         env:
           ZENI_API_KEY: ${{ secrets.ZENI_API_KEY }}
         run: |
-          bunx zenitest run --dir zeni_tests
+          bunx zenitest run --dir zenitests
 ```
