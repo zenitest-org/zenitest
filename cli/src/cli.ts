@@ -646,16 +646,63 @@ function loadSingleTestCaseFile(filePath: string): any | null {
   return null;
 }
 
+function findTestCaseByIdOrPath(target: string, dirPath: string): any | null {
+  const directAbs = resolve(process.cwd(), target);
+  if (existsSync(directAbs) && statSync(directAbs).isFile()) {
+    return loadSingleTestCaseFile(directAbs);
+  }
+
+  for (const ext of [".yaml", ".yml", ".json"]) {
+    const withExt = resolve(process.cwd(), `${target}${ext}`);
+    if (existsSync(withExt) && statSync(withExt).isFile()) {
+      return loadSingleTestCaseFile(withExt);
+    }
+  }
+
+  const candidateDirs = [
+    join(dirPath, "web"),
+    join(dirPath, "ios"),
+    join(dirPath, "mobile-ios"),
+    join(dirPath, "android"),
+    join(dirPath, "mobile-android"),
+    dirPath,
+  ];
+
+  for (const d of candidateDirs) {
+    if (!existsSync(d)) continue;
+    for (const ext of [".yaml", ".yml", ".json", ""]) {
+      const fileName = target.endsWith(ext) || !ext ? target : `${target}${ext}`;
+      const candidatePath = join(d, fileName);
+      if (existsSync(candidatePath) && statSync(candidatePath).isFile()) {
+        return loadSingleTestCaseFile(candidatePath);
+      }
+    }
+
+    const files = readdirSync(d).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml") || f.endsWith(".json"));
+    for (const file of files) {
+      const fp = join(d, file);
+      const tc = loadSingleTestCaseFile(fp);
+      if (tc && (tc.id === target || tc.fileName === target || tc.id === `${target}.yaml`)) {
+        return tc;
+      }
+    }
+  }
+
+  return null;
+}
+
 async function runTests(options: Record<string, any>) {
   const apiKey = await getApiKey();
+  const dirName = options.dir || "zenitests";
+  const dirPath = resolve(process.cwd(), dirName);
 
-  const targetFilePaths: string[] = [];
+  const rawTargets: string[] = [];
   const rawFileOpt = options.file || options.f;
   if (rawFileOpt) {
     if (Array.isArray(rawFileOpt)) {
-      targetFilePaths.push(...rawFileOpt);
+      rawTargets.push(...rawFileOpt);
     } else if (typeof rawFileOpt === "string") {
-      targetFilePaths.push(rawFileOpt);
+      rawTargets.push(rawFileOpt);
     }
   }
 
@@ -663,15 +710,10 @@ async function runTests(options: Record<string, any>) {
   for (const arg of positionalArgs) {
     if (typeof arg === "string") {
       const abs = resolve(process.cwd(), arg);
-      if (existsSync(abs)) {
-        const stat = statSync(abs);
-        if (stat.isFile()) {
-          targetFilePaths.push(arg);
-        } else if (stat.isDirectory()) {
-          options.dir = arg;
-        }
-      } else if (arg.endsWith(".yaml") || arg.endsWith(".yml") || arg.endsWith(".json")) {
-        targetFilePaths.push(arg);
+      if (existsSync(abs) && statSync(abs).isDirectory()) {
+        options.dir = arg;
+      } else {
+        rawTargets.push(arg);
       }
     }
   }
@@ -680,18 +722,21 @@ async function runTests(options: Record<string, any>) {
   let iosTestCases: any[] = [];
   let androidTestCases: any[] = [];
 
-  if (targetFilePaths.length > 0) {
-    const loadedFiles = targetFilePaths
-      .map((fp) => loadSingleTestCaseFile(fp))
-      .filter(Boolean);
+  if (rawTargets.length > 0) {
+    const loadedFiles: any[] = [];
+    for (const target of rawTargets) {
+      const tc = findTestCaseByIdOrPath(target, dirPath);
+      if (tc) {
+        loadedFiles.push(tc);
+      } else {
+        console.warn(`\x1b[1;33m[CLI Warning] Test case "${target}" not found.\x1b[0m`);
+      }
+    }
 
     allWebTestCases = loadedFiles.filter((tc) => (tc.platform || "web").toLowerCase() === "web").map((tc) => ({ ...tc, platform: "web" }));
     iosTestCases = loadedFiles.filter((tc) => (tc.platform || "").toLowerCase() === "ios").map((tc) => ({ ...tc, platform: "ios" }));
     androidTestCases = loadedFiles.filter((tc) => (tc.platform || "").toLowerCase() === "android").map((tc) => ({ ...tc, platform: "android" }));
   } else {
-    const dirName = options.dir || "zenitests";
-    const dirPath = resolve(process.cwd(), dirName);
-
     const webDir = join(dirPath, "web");
     const iosDir = existsSync(join(dirPath, "ios")) ? join(dirPath, "ios") : join(dirPath, "mobile-ios");
     const androidDir = existsSync(join(dirPath, "android")) ? join(dirPath, "android") : join(dirPath, "mobile-android");
