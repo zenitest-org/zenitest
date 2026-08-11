@@ -6,6 +6,7 @@
     "zenitest": "./src/cli.ts"
   },
   "scripts": {
+    "build": "bun build ./src/cli.ts --outdir ./dist --target node",
     "client": "tsx src/proxyClient.ts",
     "download-chrome": "tsx download-chrome.ts"
   },

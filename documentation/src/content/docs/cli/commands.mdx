@@ -42,7 +42,7 @@ Install the `zenitest` CLI globally using your preferred package manager:
 
 ## `zenitest auth`
 
-Saves your Zeni API key to local configuration (`~/.zenitest/config.json`).
+Saves your Zeni API key to local configuration.
 
 ```bash
 zenitest auth YOUR_API_KEY
@@ -63,11 +63,24 @@ zenitest run
 | Flag | Short | Description | Default |
 | --- | --- | --- | --- |
 | `--dir <path>` | `-d` | Path to test directory | `zenitests` |
-| `--parallel <n>` | `-p` | Number of test cases to run concurrently | `5` |
+| `--platform <target>` | `-t` | Filter platform target (`web`, `ios`, `android`, or comma-separated list) | All platforms in folder |
+| `--bundle <path>` | `-b` | Path to built mobile app binary file (`.ipa` or `.apk`) | None |
+| `--parallel <n>` | `-p` | Number of web test cases to run concurrently | `5` |
 | `--help` | `-h` | Show CLI help screen | |
 
 ### Example Usage
 
+#### Web Test Suite
 ```bash
-zenitest run --dir zenitests --parallel 3
+zenitest run --dir zenitests --platform web --parallel 3
+```
+
+#### Mobile iOS App Test Suite
+```bash
+zenitest run --platform ios --bundle ./build/Runner.ipa
+```
+
+#### Mobile Android App Test Suite
+```bash
+zenitest run --platform android --bundle ./build/app-debug.apk
 ```

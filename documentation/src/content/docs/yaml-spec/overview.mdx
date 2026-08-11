@@ -5,32 +5,61 @@ description: Overview of the ZeniTest test case format.
 
 ZeniTest test files are saved as `.yaml` files in your test folder (default: `zenitests`).
 
+## Directory Organization
+
+Organize test files into platform subfolders to enable automatic platform detection:
+
+- `zenitests/web/*.yaml`: Web browser end-to-end tests.
+- `zenitests/ios/*.yaml`: iOS native mobile app tests.
+- `zenitests/android/*.yaml`: Android native mobile app tests.
+
+---
+
 ## Test Case Fields
 
 ```yaml
 id: tc_unique_id               # Required: Unique test ID
 title: Human Readable Title    # Required: Brief summary
-prodURL: https://example.com   # Required: Base URL to test
+localUrl: http://localhost:3000 # Optional: Local dev URL for web testing
+prodURL: https://example.com   # Target production URL for web testing
 expectedResult: Outcome text  # Required: Expected result
 variables:                     # Optional: Custom variables
   user: alex
 steps:                         # Required: List of test actions
-  - navigate: /
+  - navigate: /                # Required for web (omitted for mobile)
   - act: Click 'Sign In'
   - validate: Verify dashboard is visible
 ```
 
-## Basic Template
+> [!NOTE]
+> For **Mobile Tests** (iOS/Android), omit `prodURL`, `localUrl`, and `navigate` steps. The app binary (`.ipa` or `.apk`) specified via CLI is launched directly at session setup.
 
-Copy and save as `zenitests/web/my_first_test.yaml`:
+---
+
+## Basic Templates
+
+### Web Test (`zenitests/web/my_first_test.yaml`)
 
 ```yaml
-id: tc_001
-title: Example Test
+id: tc_web_001
+title: Example Web Test
+localUrl: http://localhost:3000
 prodURL: https://example.com
 expectedResult: Page title is visible.
 
 steps:
   - navigate: /
   - validate: Verify 'Example Domain' heading is visible
+```
+
+### Mobile iOS Test (`zenitests/ios/my_ios_test.yaml`)
+
+```yaml
+id: tc_ios_001
+title: Example Mobile iOS Test
+expectedResult: Product card added to cart.
+
+steps:
+  - act: Tap the Add button on ZeniPods Pro
+  - validate: Cart badge displays 1
 ```

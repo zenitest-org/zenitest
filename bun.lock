@@ -3,6 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
+      "name": "zenitest-monorepo",
       "devDependencies": {
         "turbo": "^2.0.11",
       },

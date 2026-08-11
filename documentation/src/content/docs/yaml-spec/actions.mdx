@@ -5,7 +5,7 @@ title: Step Actions
 Every step in your test uses one of three simple actions:
 
 ## 1. `navigate`
-Opens a relative path or full URL.
+Opens a relative path or full URL (used for Web tests; omitted for Mobile tests).
 
 ```yaml
 - navigate: /
@@ -14,30 +14,39 @@ Opens a relative path or full URL.
 ```
 
 ## 2. `act`
-Performs an action using natural language.
+Performs an action or mobile gesture using natural language instructions.
 
-### Typing Text
+### Typing & Text Entry (Web & Mobile)
 ```yaml
 - act: Type 'John' into the 'First Name' input field
 - act: Type '${secret.MY_PASSWORD}' into 'Password'
 ```
 
-### Clicking Elements
+### Clicking & Tapping (Web & Mobile)
 ```yaml
 - act: Click on the 'Login' button
-- act: Click 'Submit'
+- act: Tap the Cart icon to open the cart sheet drawer
+- act: Press the 'Proceed to Checkout' button
 ```
 
-### Selecting & Checking
+### Selecting, Checking & Swiping
 ```yaml
 - act: Select 'Price: Low to High' from dropdown
 - act: Check 'Remember me' checkbox
+- act: Scroll down to view product details
 ```
 
 ## 3. `validate`
-Verifies page state visually or by text content.
+Verifies page or mobile screen content visually using AI.
 
+### Web Assertions
 ```yaml
 - validate: Verify 'Welcome back' message appears
 - validate: Verify shopping cart shows 2 items
+```
+
+### Mobile Assertions
+```yaml
+- validate: Cart badge displays 1
+- validate: Order Placed Successfully! text and Continue Shopping button are displayed
 ```

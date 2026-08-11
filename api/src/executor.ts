@@ -661,7 +661,9 @@ export class Executor {
         try {
           if (step.type === "navigate") {
             const navPath = step.url || step.description || "/";
-            const targetUrl = resolveFullURL(navPath, testCase.localURL, testCase.prodURL, "prod");
+            const localUrl = testCase.localUrl || testCase.localURL;
+            const prodUrl = testCase.prodUrl || testCase.prodURL;
+            const targetUrl = resolveFullURL(navPath, localUrl, prodUrl, "prod");
             console.log(`[Executor] Navigating browser page to ${targetUrl}`);
             await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
             await waitForDomNetworkQuiet(page);
@@ -879,14 +881,14 @@ Set pageStillLoading to true if it failed ONLY because the page is still loading
       specFile: testCase.id ? `${testCase.id}.yaml` : "test.yaml",
       browser: "Chromium 124.0",
       duration: `${(totalExecutionTimeMs / 1000).toFixed(1)}s`,
-      url: testCase.prodURL || testCase.localURL || "—",
+      url: testCase.prodURL || testCase.prodUrl || testCase.localURL || testCase.localUrl || "—",
     };
 
     return {
       testCaseId: testCase.id,
       title: testCase.title,
       overallSuccess,
-      targetURL: testCase.prodURL || testCase.localURL || "",
+      targetURL: testCase.prodURL || testCase.prodUrl || testCase.localURL || testCase.localUrl || "",
       stepReports,
       networkReports,
       logReports,

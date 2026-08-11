@@ -10,6 +10,7 @@ description: Sample ZeniTest YAML test cases.
 ```yaml
 id: tc_login
 title: Login Test
+localUrl: http://localhost:3000
 prodURL: https://www.saucedemo.com
 expectedResult: Swag Labs inventory page is displayed.
 
@@ -26,6 +27,7 @@ steps:
 ```yaml
 id: tc_checkout
 title: Add to Cart & Checkout
+localUrl: http://localhost:3000
 prodURL: https://www.saucedemo.com
 expectedResult: Order confirmation message displayed.
 

@@ -64,10 +64,11 @@ description: Instructions for generating and maintaining ZeniTest YAML test case
 
 Save test files in `zenitests/web/*.yaml`, `zenitests/ios/*.yaml`, or `zenitests/android/*.yaml`.
 
-### Required Fields
+### Fields
 - `id`: Unique identifier (e.g. `tc_login_001`)
 - `title`: Short scenario description
-- `prodURL`: Target app URL (e.g. `https://app.example.com` or `http://localhost:3000`)
+- `localUrl`: Local development URL (e.g. `http://localhost:3000`)
+- `prodURL`: Target production URL (e.g. `https://app.example.com`)
 - `expectedResult`: Expected outcome description
 - `steps`: Sequence of test actions (`navigate`, `act`, `validate`)
 
@@ -91,9 +92,12 @@ zenitest run --dir zenitests
 
 Once the skill is installed, simply type `/zenitest` followed by your prompt in your AI agent chat interface:
 
-### 1. Generate New Test Cases
+### 1. Generate New Test Cases (Web or Mobile)
 ```text
-/zenitest Create an E2E test case for the new checkout page at /checkout
+/zenitest Create a Web E2E test case for the checkout page at /checkout
+```
+```text
+/zenitest Create a Mobile iOS E2E test case for checkout in zenitests/ios/tc_mobile_ios_checkout.yaml
 ```
 
 ### 2. Update Existing Tests During Refactoring
@@ -103,5 +107,5 @@ Once the skill is installed, simply type `/zenitest` followed by your prompt in 
 
 ### 3. Run & Self-Heal Test Suites
 ```text
-/zenitest Run the test suite and fix any failing test scenarios
+/zenitest Run the mobile iOS suite using --bundle ./build/Runner.ipa and fix any failing steps
 ```

@@ -247,15 +247,31 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
   router.get("/:id", async (c) => {
     try {
       const id = c.req.param("id");
+      let execution: any = null;
 
-      const { data: execution, error } = await supabase
-        .from("executions")
-        .select("*")
-        .eq("id", id)
-        .single();
+      if (/^\d+$/.test(id)) {
+        const num = parseInt(id, 10);
+        const { data: byNum } = await supabase
+          .from("executions")
+          .select("*")
+          .eq("number", num)
+          .maybeSingle();
 
-      if (error || !execution) {
-        return c.json({ success: false, error: "Execution not found" }, 404);
+        if (byNum) execution = byNum;
+      }
+
+      if (!execution) {
+        const { data: byId } = await supabase
+          .from("executions")
+          .select("*")
+          .eq("id", id)
+          .maybeSingle();
+
+        if (byId) execution = byId;
+      }
+
+      if (!execution) {
+        return c.json({ success: false, error: `Execution "${id}" not found` }, 404);
       }
 
       const { data: detailsData } = await supabase
@@ -455,7 +471,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                 title: tc.title || "Untitled Test Case",
                 status: "running",
                 platform: tcPlatform,
-                target_url: tc.prodURL || tc.localURL || null,
+                target_url: tc.prodURL || tc.prodUrl || tc.localURL || tc.localUrl || null,
                 started_at: new Date().toISOString(),
               })
               .select()
@@ -486,7 +502,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                 testCaseId: tc.id || "unknown",
                 title: tc.title || "Untitled",
                 overallSuccess: false,
-                targetURL: tc.prodURL || tc.localURL || "",
+                targetURL: tc.prodURL || tc.prodUrl || tc.localURL || tc.localUrl || "",
                 stepReports: [],
                 totalExecutionTimeMs: Date.now() - startTime,
                 totalTokensUsed: 0,
@@ -528,7 +544,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                 specFile: tc.id ? `${tc.id}.yaml` : "test.yaml",
                 browser: "Chromium 124.0",
                 duration: `${(durationMs / 1000).toFixed(1)}s`,
-                url: tc.prodURL || tc.localURL || execution.target_url || "—",
+                url: tc.prodURL || tc.prodUrl || tc.localURL || tc.localUrl || execution.target_url || "—",
               },
             };
             const processedStepReportsWithMeta = [...processedStepReports, metaItem];
@@ -647,7 +663,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             title: tc.title || "Untitled Test Case",
             status: "running",
             platform: tcPlatform,
-            target_url: tc.prodURL || tc.localURL || null,
+            target_url: tc.prodURL || tc.prodUrl || tc.localURL || tc.localUrl || null,
             started_at: new Date().toISOString(),
           })
           .select()
@@ -666,7 +682,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             testCaseId: tc.id || "unknown",
             title: tc.title || "Untitled",
             overallSuccess: false,
-            targetURL: tc.prodURL || tc.localURL || "",
+            targetURL: tc.prodURL || tc.prodUrl || tc.localURL || tc.localUrl || "",
             stepReports: [],
             totalExecutionTimeMs: Date.now() - startTime,
             totalTokensUsed: 0,
@@ -713,7 +729,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             specFile: tc.id ? `${tc.id}.yaml` : "test.yaml",
             browser: "Chromium 124.0",
             duration: `${(durationMs / 1000).toFixed(1)}s`,
-            url: tc.prodURL || tc.localURL || execution.target_url || "—",
+            url: tc.prodURL || tc.prodUrl || tc.localURL || tc.localUrl || execution.target_url || "—",
           },
         };
         const processedStepReportsWithMeta = [...processedStepReports, metaItem];

@@ -104,7 +104,9 @@ export interface TestCase {
   id: string;
   title: string;
   localURL?: string;
+  localUrl?: string;
   prodURL?: string;
+  prodUrl?: string;
   steps: TestCaseStep[];
   variables?: Record<string, string>;
   expectedResult?: string;

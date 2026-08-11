@@ -4,9 +4,9 @@
   "type": "module",
   "main": "src/server.ts",
   "scripts": {
-    "start": "tsx src/server.ts",
-    "server": "tsx src/server.ts",
-    "test": "tsx src/test-run.ts"
+    "dev": "tsx watch src/server.ts",
+    "build": "bun build ./src/server.ts --outdir ./dist --target node --external fsevents --external playwright-core --external webdriverio",
+    "start": "tsx src/server.ts"
   },
   "dependencies": {
     "@aws-sdk/client-device-farm": "^3.700.0",

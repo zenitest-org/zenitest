@@ -13,3 +13,4 @@ zeni_tests
 .env.prod
 .env.local
 sample-apps
+dist

@@ -9,17 +9,18 @@
     "documentation"
   ],
   "scripts": {
-    "start": "bun --cwd api start",
+    "start:api": "turbo run start --filter=api",
+    "start:app": "turbo run start --filter=app",
+    "start:docs": "turbo run start --filter=documentation",
     "dev": "turbo run dev",
-    "dev:app": "bun --cwd app dev",
-    "dev:docs": "bun --cwd documentation dev",
-    "dev:api": "bun --cwd api ",
+    "dev:app": "turbo run dev --filter=app",
+    "dev:docs": "turbo run dev --filter=documentation",
+    "dev:api": "turbo run dev --filter=api",
     "build": "turbo run build",
-    "server": "turbo run server",
-    "client": "turbo run client",
-    "test": "turbo run test",
-    "lint": "turbo run lint",
-    "zenitest": "tsx cli/src/cli.ts"
+    "build:api": "turbo run build --filter=api",
+    "build:app": "turbo run build --filter=app",
+    "build:docs": "turbo run build --filter=documentation",
+    "build:cli": "turbo run build --filter=cli"
   },
   "devDependencies": {
     "turbo": "^2.0.11"

@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 
 import { ZeniProxyClient } from "./proxyClient";
-import { readdirSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, existsSync } from "fs";
+import { readdirSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, existsSync, statSync } from "fs";
 import { join, resolve, basename } from "path";
 import { homedir } from "os";
 import { createInterface } from "readline/promises";
@@ -126,9 +126,10 @@ function showHelp() {
 Usage: zenitest <command> [options]
 
 Commands:
-  auth [api_key]   Authenticate CLI with API key (prompts if omitted)
-  client           Start the browser proxy client and establish CDP tunnel
-  run              Read test cases from a folder and run them via the server
+  auth [api_key]       Authenticate CLI with API key (prompts if omitted)
+  client               Start the browser proxy client and establish CDP tunnel
+  run                  Read test cases from a folder and run them via the server
+  report <run_number>  Fetch execution report summary (e.g. zenitest report 21)
 
 Options:
   --dir, -d           Directory containing test cases (defaults to zenitests)
@@ -165,6 +166,7 @@ function parseArgs(args: string[]) {
 
   // Map aliases
   if (options.d) options.dir = options.d;
+  if (options.f) options.file = options.f;
   if (options.p) options.parallel = options.p;
   if (options.c) options.parallel = options.c;
   if (options.t) options.platform = options.t;
@@ -177,6 +179,7 @@ function parseArgs(args: string[]) {
 
 const API_BASE_URL = process.env.ZENITEST_API_URL || process.env.API_URL || "http://localhost:3001";
 const WS_BASE_URL = process.env.ZENITEST_WS_URL || process.env.WS_URL || "ws://localhost:3001";
+const APP_BASE_URL = process.env.ZENITEST_APP_URL || process.env.APP_URL || "https://app.zenitest.ai";
 
 async function verifyApiKey(apiKey: string): Promise<{ valid: boolean; user?: any }> {
   try {
@@ -354,41 +357,18 @@ async function runTestCase(testCase: any, apiKey: string) {
 
 interface LiveTestCaseState {
   id: string;
+  displayId: string;
   platform: string;
+  platformDetail: string; // e.g. "WEB · Chrome", "MOBILE · iOS", "MOBILE · Android"
   title: string;
-  status: "⏳ PENDING" | "🏃 RUNNING" | "✅ PASSED" | "❌ FAILED";
-  currentStep: string;
-  durationMs: number;
-}
-
-function visibleLength(str: string): number {
-  return str.replace(/\x1b\[[0-9;]*m/g, "").length;
-}
-
-function truncateToWidth(str: string, width: number): string {
-  const vis = visibleLength(str);
-  if (vis <= width) return str;
-  let curLen = 0;
-  let result = "";
-  let inAnsi = false;
-
-  for (let i = 0; i < str.length; i++) {
-    if (str[i] === "\x1b") {
-      inAnsi = true;
-    }
-    result += str[i];
-    if (!inAnsi) {
-      curLen++;
-      if (curLen >= width - 3) {
-        result += "...";
-        break;
-      }
-    }
-    if (inAnsi && str[i] === "m") {
-      inAnsi = false;
-    }
-  }
-  return result;
+  rawStatus: "PENDING" | "RUNNING" | "PASSED" | "FAILED";
+  stepIndex: number;
+  totalSteps: number;
+  stepType: string;
+  stepDescription: string;
+  error?: string;
+  startTimeMs?: number;
+  durationMs?: number;
 }
 
 class LiveReportRenderer {
@@ -396,17 +376,34 @@ class LiveReportRenderer {
   private rows: Map<string, LiveTestCaseState> = new Map();
   private lastLineCount: number = 0;
 
-  constructor(testCases: { id: string; title: string; platform?: string }[]) {
+  constructor(testCases: { id: string; title: string; platform?: string; fileName?: string }[]) {
     for (const tc of testCases) {
       const p = (tc.platform || "web").toLowerCase();
-      const platformDisplay = p === "ios" ? "iOS" : p === "android" ? "Android" : "Web";
+      let platformDisplay = "WEB";
+      let platformDetail = "WEB";
+      if (p === "ios" || p === "mobile-ios") {
+        platformDisplay = "MOBILE";
+        platformDetail = "MOBILE · iOS";
+      } else if (p === "android" || p === "mobile-android") {
+        platformDisplay = "MOBILE";
+        platformDetail = "MOBILE · Android";
+      } else if (p.includes("mobile")) {
+        platformDisplay = "MOBILE";
+        platformDetail = "MOBILE";
+      }
+
+      const displayId = tc.fileName || (tc.id.endsWith(".yaml") || tc.id.endsWith(".yml") ? tc.id : `${tc.id}.yaml`);
       this.rows.set(tc.id, {
         id: tc.id,
+        displayId,
         platform: platformDisplay,
+        platformDetail,
         title: tc.title,
-        status: "⏳ PENDING",
-        currentStep: "Queued",
-        durationMs: 0,
+        rawStatus: "PENDING",
+        stepIndex: 0,
+        totalSteps: 0,
+        stepType: "",
+        stepDescription: "",
       });
     }
   }
@@ -419,22 +416,30 @@ class LiveReportRenderer {
   public updateStep(testCaseId: string, stepIndex: number, totalSteps: number, stepType: string, description: string) {
     const row = this.rows.get(testCaseId);
     if (row) {
-      row.status = "🏃 RUNNING";
-      if (stepIndex === 0 || stepType.toUpperCase() === "INIT") {
-        row.currentStep = description || "Initializing Device...";
-      } else {
-        const shortDesc = description.length > 60 ? description.slice(0, 57) + "..." : description;
-        row.currentStep = `[${stepIndex}/${totalSteps}] ${stepType.toUpperCase()}: ${shortDesc}`;
+      if (!row.startTimeMs) {
+        row.startTimeMs = Date.now();
       }
+      row.rawStatus = "RUNNING";
+      row.stepIndex = stepIndex;
+      row.totalSteps = totalSteps;
+      row.stepType = stepType;
+      row.stepDescription = description;
     }
     this.render();
   }
 
-  public completeTest(testCaseId: string, status: "PASSED" | "FAILED", durationMs: number) {
+  public completeTest(testCaseId: string, status: "PASSED" | "FAILED", durationMs?: number, error?: string) {
     const row = this.rows.get(testCaseId);
     if (row) {
-      row.status = status === "PASSED" ? "✅ PASSED" : "❌ FAILED";
-      row.durationMs = durationMs;
+      row.rawStatus = status === "PASSED" ? "PASSED" : "FAILED";
+      if (durationMs && durationMs > 0) {
+        row.durationMs = durationMs;
+      } else if (row.startTimeMs) {
+        row.durationMs = Date.now() - row.startTimeMs;
+      }
+      if (error) {
+        row.error = error;
+      }
     }
     this.render();
   }
@@ -444,78 +449,87 @@ class LiveReportRenderer {
       process.stdout.write(`\x1b[${this.lastLineCount}A\x1b[0J`);
     }
 
-    const cols = process.stdout.columns || 110;
-    const termWidth = Math.max(80, Math.min(cols, 130));
-    const border = "=".repeat(termWidth);
-    const dashBorder = "-".repeat(termWidth);
+    const cols = process.stdout.columns || 80;
+    const termWidth = Math.max(60, Math.min(cols, 100));
+    const separator = "\x1b[90m" + "─".repeat(termWidth) + "\x1b[0m";
 
     const lines: string[] = [];
-    lines.push(border);
-    const titlePadding = Math.max(0, Math.floor((termWidth - 23) / 2));
-    lines.push(" ".repeat(titlePadding) + "TEST EXECUTION REPORT");
-    lines.push(border);
-    if (this.executionId) {
-      lines.push(`Execution ID: ${this.executionId}`);
+
+    const rowList = Array.from(this.rows.values());
+
+    const groups: { [key: string]: LiveTestCaseState[] } = {};
+    for (const r of rowList) {
+      const g = r.platformDetail || "WEB";
+      if (!groups[g]) groups[g] = [];
+      groups[g].push(r);
+    }
+
+    let maxIdLen = 20;
+    for (const r of rowList) {
+      if (r.displayId.length > maxIdLen) maxIdLen = r.displayId.length;
+    }
+
+    for (const groupHeader of Object.keys(groups)) {
+      lines.push(`\x1b[1;37m${groupHeader}\x1b[0m`);
+      for (const r of groups[groupHeader]) {
+        let icon = "\x1b[90m·\x1b[0m";
+        let statusStr = "\x1b[90mqueued\x1b[0m";
+
+        if (r.rawStatus === "PASSED") {
+          icon = "\x1b[1;32m✓\x1b[0m";
+          if (r.durationMs && r.durationMs > 0) {
+            statusStr = `\x1b[1;32m${(r.durationMs / 1000).toFixed(2)}s\x1b[0m`;
+          } else {
+            statusStr = "\x1b[1;32mpassed\x1b[0m";
+          }
+        } else if (r.rawStatus === "FAILED") {
+          icon = "\x1b[1;31m×\x1b[0m";
+          const stepInfo = r.stepIndex > 0 && r.totalSteps > 0 ? ` at step ${r.stepIndex}/${r.totalSteps}` : "";
+          const actionText = this.formatStepName(r.stepType, r.stepDescription || r.error || "");
+          const detail = actionText ? `: ${actionText}` : "";
+          statusStr = `\x1b[1;31mfailed${stepInfo}${detail}\x1b[0m`;
+        } else if (r.rawStatus === "RUNNING") {
+          icon = "\x1b[1;33m⠋\x1b[0m";
+          const stepInfo = r.stepIndex > 0 && r.totalSteps > 0 ? ` (${r.stepIndex}/${r.totalSteps})` : "";
+          const actionText = this.formatStepName(r.stepType, r.stepDescription);
+          const detail = actionText ? `: ${actionText}` : "";
+          statusStr = `\x1b[1;33mrunning${stepInfo}${detail}\x1b[0m`;
+        }
+
+        const paddedId = r.displayId.padEnd(maxIdLen + 4, " ");
+        lines.push(`  ${icon} ${paddedId}${statusStr}`);
+      }
       lines.push("");
     }
 
-    const idHeader = "Test Case ID";
-    const platformHeader = "Platform";
-    const titleHeader = "Title";
-    const statusHeader = "Status";
-    const stepHeader = "Current Step";
+    lines.push(separator);
 
-    const rowList = Array.from(this.rows.values());
-    const maxIdLen = 14;
-    const maxPlatformLen = 8;
-    const maxTitleLen = 24;
-    const maxStatusLen = 10;
-    const fixedWidths = maxIdLen + maxPlatformLen + maxTitleLen + maxStatusLen + 16;
-    const maxStepLen = Math.max(30, termWidth - fixedWidths);
-
-    const padTrunc = (str: string, len: number) => {
-      const vis = visibleLength(str);
-      if (vis > len) {
-        return truncateToWidth(str, len);
-      }
-      return str + " ".repeat(len - vis);
-    };
-
-    const headerRow = `| ${padTrunc(idHeader, maxIdLen)} | ${padTrunc(platformHeader, maxPlatformLen)} | ${padTrunc(titleHeader, maxTitleLen)} | ${padTrunc(statusHeader, maxStatusLen)} | ${padTrunc(stepHeader, maxStepLen)} |`;
-    const sep = `|-${"-".repeat(maxIdLen)}-|-` + `${"-".repeat(maxPlatformLen)}-|-` + `${"-".repeat(maxTitleLen)}-|-` + `${"-".repeat(maxStatusLen)}-|-` + `${"-".repeat(maxStepLen)}-|`;
-
-    lines.push(headerRow);
-    lines.push(sep);
-
-    for (const r of rowList) {
-      let statusFormatted = r.status as string;
-      if (r.status === "✅ PASSED") statusFormatted = "\x1b[1;32m✅ PASSED\x1b[0m";
-      else if (r.status === "❌ FAILED") statusFormatted = "\x1b[1;31m❌ FAILED\x1b[0m";
-      else if (r.status === "🏃 RUNNING") statusFormatted = "\x1b[1;33m🏃 RUNNING\x1b[0m";
-      else statusFormatted = "\x1b[1;30m⏳ PENDING\x1b[0m";
-
-      lines.push(`| ${padTrunc(r.id, maxIdLen)} | ${padTrunc(r.platform, maxPlatformLen)} | ${padTrunc(r.title, maxTitleLen)} | ${padTrunc(statusFormatted, maxStatusLen)} | ${padTrunc(r.currentStep, maxStepLen)} |`);
-    }
-
-    lines.push(dashBorder);
     const total = rowList.length;
-    const passed = rowList.filter((r) => r.status === "✅ PASSED").length;
-    const failed = rowList.filter((r) => r.status === "❌ FAILED").length;
-    const running = rowList.filter((r) => r.status === "🏃 RUNNING").length;
-    const pending = rowList.filter((r) => r.status === "⏳ PENDING").length;
+    const passed = rowList.filter((r) => r.rawStatus === "PASSED").length;
+    const failed = rowList.filter((r) => r.rawStatus === "FAILED").length;
+    const running = rowList.filter((r) => r.rawStatus === "RUNNING").length;
 
-    if (isFinal) {
-      lines.push(`Total tests run: ${total}`);
-      lines.push(`Passed:          \x1b[1;32m${passed}\x1b[0m`);
-      lines.push(`Failed:          ${failed > 0 ? `\x1b[1;31m${failed}\x1b[0m` : `0`}`);
-    } else {
-      lines.push(`Summary: Total ${total} | Passed: ${passed} | Failed: ${failed} | Running: ${running} | Pending: ${pending}`);
+    const parts: string[] = [];
+    parts.push(`\x1b[1;32m${passed} passed\x1b[0m`);
+    parts.push(`${failed > 0 ? `\x1b[1;31m${failed} failed\x1b[0m` : `0 failed`}`);
+    if (running > 0) {
+      parts.push(`\x1b[1;33m${running} running\x1b[0m`);
     }
-    lines.push(border);
+    parts.push(`${total} total`);
 
-    const output = lines.join("\n") + "\n";
-    process.stdout.write(output);
-    this.lastLineCount = (output.match(/\n/g) || []).length;
+    lines.push(parts.join(" \x1b[90m·\x1b[0m "));
+
+    const output = lines.join("\n");
+    process.stdout.write(output + "\n");
+    this.lastLineCount = (output.match(/\n/g) || []).length + 1;
+  }
+
+  private formatStepName(stepType: string, description: string): string {
+    if (!description) return stepType || "";
+    if (stepType.toLowerCase() === "navigate" && !description.toLowerCase().startsWith("navigate")) {
+      return `Navigate ${description}`;
+    }
+    return description.length > 45 ? description.slice(0, 42) + "..." : description;
   }
 }
 
@@ -531,6 +545,7 @@ function loadTestCasesFromDir(targetDir: string): any[] {
       const content = readFileSync(filePath, "utf-8");
       let testCase: any = (file.endsWith(".yaml") || file.endsWith(".yml")) ? parseYaml(content) : JSON.parse(content);
       if (testCase && testCase.id && testCase.title && Array.isArray(testCase.steps)) {
+        testCase.fileName = file;
         testCase.steps = testCase.steps.map((s: any, idx: number) => {
           if (typeof s === "object" && s !== null) {
             let stepType = s.type;
@@ -569,32 +584,137 @@ function loadTestCasesFromDir(targetDir: string): any[] {
   return testCases;
 }
 
+function loadSingleTestCaseFile(filePath: string): any | null {
+  const absolutePath = resolve(process.cwd(), filePath);
+  if (!existsSync(absolutePath)) {
+    console.warn(`\x1b[1;33m[CLI Warning] Test file not found: "${filePath}"\x1b[0m`);
+    return null;
+  }
+
+  try {
+    const content = readFileSync(absolutePath, "utf-8");
+    let testCase: any = (filePath.endsWith(".yaml") || filePath.endsWith(".yml")) ? parseYaml(content) : JSON.parse(content);
+    if (testCase && testCase.id && testCase.title && Array.isArray(testCase.steps)) {
+      testCase.fileName = basename(filePath);
+
+      if (!testCase.platform) {
+        const lowerPath = filePath.toLowerCase();
+        if (lowerPath.includes("/ios/") || lowerPath.includes("/mobile-ios/")) {
+          testCase.platform = "ios";
+        } else if (lowerPath.includes("/android/") || lowerPath.includes("/mobile-android/")) {
+          testCase.platform = "android";
+        } else {
+          testCase.platform = "web";
+        }
+      }
+
+      testCase.steps = testCase.steps.map((s: any, idx: number) => {
+        if (typeof s === "object" && s !== null) {
+          let stepType = s.type;
+          let stepUrl = s.url;
+          let stepDesc = s.description;
+
+          if (!stepType) {
+            if (s.navigate !== undefined) {
+              stepType = "navigate";
+              stepUrl = s.navigate;
+              stepDesc = typeof s.navigate === "string" ? s.navigate : "/";
+            } else if (s.act !== undefined) {
+              stepType = "act";
+              stepDesc = s.act;
+            } else if (s.validate !== undefined) {
+              stepType = "validate";
+              stepDesc = s.validate;
+            }
+          }
+
+          return {
+            index: s.index ?? (idx + 1),
+            type: stepType,
+            url: stepUrl,
+            description: stepDesc || (stepType === "navigate" ? (stepUrl || "/") : ""),
+          };
+        }
+        return s;
+      });
+
+      return testCase;
+    }
+  } catch (err: any) {
+    console.warn(`\x1b[1;33m[CLI Warning] Failed to parse test case file "${filePath}": ${err.message}\x1b[0m`);
+  }
+  return null;
+}
+
 async function runTests(options: Record<string, any>) {
   const apiKey = await getApiKey();
-  const dirName = options.dir || "zenitests";
-  const dirPath = resolve(process.cwd(), dirName);
 
-  const webDir = join(dirPath, "web");
-  const iosDir = existsSync(join(dirPath, "ios")) ? join(dirPath, "ios") : join(dirPath, "mobile-ios");
-  const androidDir = existsSync(join(dirPath, "android")) ? join(dirPath, "android") : join(dirPath, "mobile-android");
+  const targetFilePaths: string[] = [];
+  const rawFileOpt = options.file || options.f;
+  if (rawFileOpt) {
+    if (Array.isArray(rawFileOpt)) {
+      targetFilePaths.push(...rawFileOpt);
+    } else if (typeof rawFileOpt === "string") {
+      targetFilePaths.push(rawFileOpt);
+    }
+  }
 
-  const filterPlatform = (options.platform || options.target || "").toLowerCase();
-  const selectedPlatforms = filterPlatform ? filterPlatform.split(",").map((p) => p.trim()).filter(Boolean) : [];
+  const positionalArgs = options._.slice(1);
+  for (const arg of positionalArgs) {
+    if (typeof arg === "string") {
+      const abs = resolve(process.cwd(), arg);
+      if (existsSync(abs)) {
+        const stat = statSync(abs);
+        if (stat.isFile()) {
+          targetFilePaths.push(arg);
+        } else if (stat.isDirectory()) {
+          options.dir = arg;
+        }
+      } else if (arg.endsWith(".yaml") || arg.endsWith(".yml") || arg.endsWith(".json")) {
+        targetFilePaths.push(arg);
+      }
+    }
+  }
 
-  const runWeb = selectedPlatforms.length === 0 || selectedPlatforms.some((p) => p === "web");
-  const runIos = selectedPlatforms.length === 0 || selectedPlatforms.some((p) => p === "ios" || p === "mobile-ios");
-  const runAndroid = selectedPlatforms.length === 0 || selectedPlatforms.some((p) => p === "android" || p === "mobile-android");
+  let allWebTestCases: any[] = [];
+  let iosTestCases: any[] = [];
+  let androidTestCases: any[] = [];
 
-  const rawWebTestCases = (runWeb && existsSync(webDir)) ? loadTestCasesFromDir(webDir) : [];
-  const iosTestCases = (runIos && existsSync(iosDir)) ? loadTestCasesFromDir(iosDir).map((tc) => ({ ...tc, platform: "ios" })) : [];
-  const androidTestCases = (runAndroid && existsSync(androidDir)) ? loadTestCasesFromDir(androidDir).map((tc) => ({ ...tc, platform: "android" })) : [];
+  if (targetFilePaths.length > 0) {
+    const loadedFiles = targetFilePaths
+      .map((fp) => loadSingleTestCaseFile(fp))
+      .filter(Boolean);
 
-  // Fallback to top-level specs if no subfolders exist and web is enabled
-  const rootTestCases = (runWeb && rawWebTestCases.length === 0 && iosTestCases.length === 0 && androidTestCases.length === 0)
-    ? loadTestCasesFromDir(dirPath)
-    : [];
+    allWebTestCases = loadedFiles.filter((tc) => (tc.platform || "web").toLowerCase() === "web").map((tc) => ({ ...tc, platform: "web" }));
+    iosTestCases = loadedFiles.filter((tc) => (tc.platform || "").toLowerCase() === "ios").map((tc) => ({ ...tc, platform: "ios" }));
+    androidTestCases = loadedFiles.filter((tc) => (tc.platform || "").toLowerCase() === "android").map((tc) => ({ ...tc, platform: "android" }));
+  } else {
+    const dirName = options.dir || "zenitests";
+    const dirPath = resolve(process.cwd(), dirName);
 
-  const allWebTestCases = [...rawWebTestCases, ...rootTestCases].map((tc) => ({ ...tc, platform: "web" }));
+    const webDir = join(dirPath, "web");
+    const iosDir = existsSync(join(dirPath, "ios")) ? join(dirPath, "ios") : join(dirPath, "mobile-ios");
+    const androidDir = existsSync(join(dirPath, "android")) ? join(dirPath, "android") : join(dirPath, "mobile-android");
+
+    const filterPlatform = (options.platform || options.target || "").toLowerCase();
+    const selectedPlatforms = filterPlatform ? filterPlatform.split(",").map((p) => p.trim()).filter(Boolean) : [];
+
+    const runWeb = selectedPlatforms.length === 0 || selectedPlatforms.some((p) => p === "web");
+    const runIos = selectedPlatforms.length === 0 || selectedPlatforms.some((p) => p === "ios" || p === "mobile-ios");
+    const runAndroid = selectedPlatforms.length === 0 || selectedPlatforms.some((p) => p === "android" || p === "mobile-android");
+
+    const rawWebTestCases = (runWeb && existsSync(webDir)) ? loadTestCasesFromDir(webDir) : [];
+    const rawIosTestCases = (runIos && existsSync(iosDir)) ? loadTestCasesFromDir(iosDir).map((tc) => ({ ...tc, platform: "ios" })) : [];
+    const rawAndroidTestCases = (runAndroid && existsSync(androidDir)) ? loadTestCasesFromDir(androidDir).map((tc) => ({ ...tc, platform: "android" })) : [];
+
+    const rootTestCases = (runWeb && rawWebTestCases.length === 0 && rawIosTestCases.length === 0 && rawAndroidTestCases.length === 0)
+      ? loadTestCasesFromDir(dirPath)
+      : [];
+
+    allWebTestCases = [...rawWebTestCases, ...rootTestCases].map((tc) => ({ ...tc, platform: "web" }));
+    iosTestCases = rawIosTestCases;
+    androidTestCases = rawAndroidTestCases;
+  }
 
   const combinedPlatforms: string[] = [];
   if (allWebTestCases.length > 0) combinedPlatforms.push("web");
@@ -605,15 +725,11 @@ async function runTests(options: Record<string, any>) {
   const totalCount = combinedTestCases.length;
 
   if (totalCount === 0) {
-    console.error(`\x1b[1;31mError: No valid test cases found in "${dirPath}".\x1b[0m`);
+    console.error(`\x1b[1;31mError: No valid test cases found.\x1b[0m`);
     process.exit(1);
   }
 
-  console.log(`\x1b[1;36m[ZeniTest Suite] Found ${totalCount} test case(s):\x1b[0m`);
-  if (allWebTestCases.length > 0) console.log(` - Web: ${allWebTestCases.length} test(s) in ${dirName}/web/`);
-  if (iosTestCases.length > 0) console.log(` - Mobile iOS: ${iosTestCases.length} test(s) in ${dirName}/ios/`);
-  if (androidTestCases.length > 0) console.log(` - Mobile Android: ${androidTestCases.length} test(s) in ${dirName}/android/`);
-  console.log();
+
 
   let executionId: string | undefined;
   try {
@@ -846,9 +962,160 @@ async function runTests(options: Record<string, any>) {
 
   renderer.render(true);
 
+  if (executionId) {
+    console.log();
+    console.log(`\x1b[90mView execution report:\x1b[0m \x1b[4;36m${APP_BASE_URL}/runs/${executionId}\x1b[0m`);
+    console.log();
+  }
+
   if (exitCode !== 0) {
     process.exit(exitCode);
   }
+}
+
+async function runReport(options: Record<string, any>) {
+  const apiKey = await getApiKey();
+  const runArg = options._[1] || options.run || options.id || options.number;
+
+  if (!runArg) {
+    console.error("\x1b[1;31mError: Missing required run_number argument.\x1b[0m");
+    console.log("Usage: zenitest report <run_number> (e.g. zenitest report 21)");
+    process.exit(1);
+  }
+
+  const res = await fetch(`${API_BASE_URL}/api/executions/${runArg}`, {
+    headers: {
+      "x-api-key": apiKey,
+      "Authorization": `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    console.error(`\x1b[1;31mError fetching report for run "${runArg}": ${errData.error || res.statusText}\x1b[0m`);
+    process.exit(1);
+  }
+
+  const body = await res.json();
+  if (!body.success || !body.data) {
+    console.error(`\x1b[1;31mExecution "${runArg}" not found.\x1b[0m`);
+    process.exit(1);
+  }
+
+  const exec = body.data;
+  const details = exec.details || [];
+
+  const reportItems = details.map((d: any) => {
+    const rawPlatform = (d.platform || "web").toLowerCase();
+    let platformDisplay = "Web";
+    if (rawPlatform === "ios" || rawPlatform === "mobile-ios") {
+      platformDisplay = "Mobile iOS";
+    } else if (rawPlatform === "android" || rawPlatform === "mobile-android") {
+      platformDisplay = "Mobile Android";
+    } else if (rawPlatform.includes("mobile")) {
+      platformDisplay = "Mobile";
+    }
+
+    const testCaseId = d.info?.specFile || (d.test_case_id ? (d.test_case_id.endsWith(".yaml") || d.test_case_id.endsWith(".yml") ? d.test_case_id : `${d.test_case_id}.yaml`) : "test.yaml");
+    const status = (d.status || "pending").toUpperCase();
+    const durationMs = d.duration_ms || 0;
+    const durationFormatted = (durationMs / 1000).toFixed(2) + "s";
+
+    const allSteps = (d.step_reports || []).filter((s: any) => s.type !== "__meta__");
+    const numberSteps = allSteps.length;
+
+    let failedAtStepStr = "-";
+    if (status === "FAILED") {
+      const failedStepIndex = allSteps.findIndex((s: any) => s.success === false || s.status === "failed");
+      if (failedStepIndex !== -1) {
+        const stepObj = allSteps[failedStepIndex];
+        const stepNum = stepObj.index || failedStepIndex + 1;
+        const stepDesc = stepObj.description || stepObj.actionType || stepObj.type || "";
+        failedAtStepStr = `Step ${stepNum}/${numberSteps}${stepDesc ? `: ${stepDesc}` : ""}`;
+      } else if (d.error_message) {
+        failedAtStepStr = d.error_message;
+      }
+    }
+
+    let analysisStr = "N/A";
+    if (d.bug_analysis || d.ai_analysis || d.bugAnalysis) {
+      const ba = d.bug_analysis || d.ai_analysis || d.bugAnalysis;
+      if (typeof ba === "string") {
+        analysisStr = ba;
+      } else if (typeof ba === "object") {
+        analysisStr = ba.summary || ba.rootCause || ba.recommendation || JSON.stringify(ba);
+      }
+    } else if (d.error_message) {
+      analysisStr = d.error_message;
+    }
+
+    return {
+      testCaseId,
+      platform: platformDisplay,
+      status,
+      durationMs,
+      durationFormatted,
+      numberSteps,
+      failedAtStep: failedAtStepStr,
+      analysis: analysisStr,
+    };
+  });
+
+  if (options.json) {
+    console.log(JSON.stringify({
+      executionId: exec.id,
+      runNumber: exec.number || exec.run_number || runArg,
+      title: exec.title,
+      status: exec.status,
+      totalTests: exec.total_test_cases || reportItems.length,
+      passedTests: exec.passed_test_cases || reportItems.filter((i: any) => i.status === "PASSED").length,
+      failedTests: exec.failed_test_cases || reportItems.filter((i: any) => i.status === "FAILED").length,
+      totalDurationMs: exec.total_duration_ms || 0,
+      testCases: reportItems,
+    }, null, 2));
+    return;
+  }
+
+  const cols = process.stdout.columns || 80;
+  const termWidth = Math.max(60, Math.min(cols, 100));
+  const separator = "\x1b[90m" + "─".repeat(termWidth) + "\x1b[0m";
+
+  const runNumStr = exec.number || exec.run_number || runArg;
+  const statusColor = exec.status === "completed" || exec.status === "passed"
+    ? "\x1b[1;32mPASSED\x1b[0m"
+    : exec.status === "failed"
+    ? "\x1b[1;31mFAILED\x1b[0m"
+    : "\x1b[1;33mRUNNING\x1b[0m";
+
+  console.log(`\x1b[1mZeniTest \x1b[90m›\x1b[0m Execution Report \x1b[1;36m#${runNumStr}\x1b[0m`);
+  console.log(separator);
+  console.log(`\x1b[90mExecution ID:\x1b[0m ${exec.id}`);
+  console.log(`\x1b[90mStatus:\x1b[0m       ${statusColor} \x1b[90m·\x1b[0m ${exec.passed_test_cases || 0} Passed \x1b[90m·\x1b[0m ${exec.failed_test_cases || 0} Failed \x1b[90m·\x1b[0m ${reportItems.length} Total`);
+  if (exec.total_duration_ms) {
+    console.log(`\x1b[90mDuration:\x1b[0m     ${(exec.total_duration_ms / 1000).toFixed(2)}s`);
+  }
+  console.log(separator);
+  console.log();
+
+  reportItems.forEach((item: any, idx: number) => {
+    const statusFormatted = item.status === "PASSED"
+      ? "\x1b[1;32m✓ PASSED\x1b[0m"
+      : "\x1b[1;31m× FAILED\x1b[0m";
+
+    console.log(`\x1b[1m[${idx + 1}] ${item.testCaseId}\x1b[0m`);
+    console.log(`    \x1b[90mPlatform:\x1b[0m       ${item.platform}`);
+    console.log(`    \x1b[90mStatus:\x1b[0m         ${statusFormatted}`);
+    console.log(`    \x1b[90mDuration:\x1b[0m       ${item.durationFormatted}`);
+    console.log(`    \x1b[90mSteps:\x1b[0m          ${item.numberSteps} steps`);
+    console.log(`    \x1b[90mFailed at Step:\x1b[0m ${item.failedAtStep}`);
+    console.log(`    \x1b[90mAnalysis:\x1b[0m       ${item.analysis}`);
+    console.log();
+  });
+
+  console.log(separator);
+  console.log(`\x1b[90mView details:\x1b[0m \x1b[4;36m${APP_BASE_URL}/runs/${exec.id}\x1b[0m`);
+  console.log();
 }
 
 async function main() {
@@ -871,6 +1138,9 @@ async function main() {
       break;
     case "run":
       await runTests(options);
+      break;
+    case "report":
+      await runReport(options);
       break;
     default:
       console.error(`Unknown command: ${command}`);

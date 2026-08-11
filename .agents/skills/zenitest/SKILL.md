@@ -20,8 +20,8 @@ Test cases are defined as YAML files stored in the `zenitests/` directory (subfo
 | `id` | `string` | Unique identifier for the test case (e.g. `tc_saucedemo_login`) | Yes |
 | `title` | `string` | Human-readable title describing the test scenario | Yes |
 | `priority` | `string` | Priority level (`high`, `medium`, `low`) | Optional |
-| `prodURL` | `string` | Base production URL for the target application | Yes (or `localURL`) |
-| `localURL` | `string` | Local development URL (e.g. `localhost:3000`) | Optional |
+| `localUrl` / `localURL` | `string` | Local development URL (e.g. `http://localhost:3000`) | Optional |
+| `prodURL` / `prodUrl` | `string` | Base production URL for the target application | Optional (for Web) |
 | `variables` | `map` | Key-value pairs for reusable test data referenced in steps | Optional |
 | `expectedResult` | `string` | Summary of expected final outcome | Yes |
 | `steps` | `list` | Sequence of test steps (`navigate`, `act`, `validate`) | Yes |
@@ -102,7 +102,9 @@ zenitest run [options]
 
 **Options:**
 - `--dir, -d <directory>`: Folder containing `.yaml` test files (default: `zenitests`).
-- `--parallel, -p <count>`: Number of test cases to run concurrently (default: `5`).
+- `--platform, -t <target>`: Filter test platform target: `web`, `ios`, `android` (comma-separated list).
+- `--bundle, -b <path>`: Path to built mobile app binary file (`.ipa` or `.apk`).
+- `--parallel, -p <count>`: Number of web test cases to run concurrently (default: `5`).
 - `--help, -h`: Display CLI help screen.
 
 ---
@@ -114,8 +116,9 @@ zenitest run [options]
    ```yaml
    secrets:
      SAUCE_PASSWORD: secret_sauce
+     AWS_PROJECT_ARN: arn:aws:devicefarm:us-west-2:123456789012:testgrid-project:xxx
    ```
 3. **Execute Test Cases**:
-   ```bash
-   zenitest run --dir zenitests --parallel 2
-   ```
+   - **Web Suite**: `zenitest run --platform web --parallel 2`
+   - **Mobile iOS Suite**: `zenitest run --platform ios --bundle ./build/Runner.ipa`
+   - **Mobile Android Suite**: `zenitest run --platform android --bundle ./build/app-debug.apk`

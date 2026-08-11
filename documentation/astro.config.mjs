@@ -58,6 +58,7 @@ export default defineConfig({
         {
           label: "Guides",
           items: [
+            { label: "Mobile Testing", slug: "guides/mobile-testing" },
             { label: "Test Examples", slug: "guides/examples" },
             { label: "CI/CD Setup", slug: "guides/cicd" },
           ],
