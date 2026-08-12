@@ -8,7 +8,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import { WebSocket } from "ws";
 import { chromium } from "playwright-core";
-import { supabase, uploadScreenshot, attachSignedUrlsToDetails } from "../db/supabase";
+import {
+  supabase,
+  uploadScreenshot,
+  attachSignedUrlsToDetails,
+} from "../db/supabase";
 import { Executor } from "../executor";
 import { MobileExecutor, uploadAppBinaryToSupabase } from "../mobile-executor";
 import { TestCase, TestCaseExecutionReport } from "../types";
@@ -22,18 +26,23 @@ async function analyzeTestCaseBug(
   stepReports: any[],
   networkReports: any[],
   logReports: any[],
-  apiKey?: string
+  apiKey?: string,
 ): Promise<void> {
   try {
     const key = apiKey || process.env.GEMINI_API_KEY || "";
     if (!key) {
-      console.warn(`[BugAnalyzer] Missing GEMINI_API_KEY. Setting default bug_analysis for detail ${detailId}.`);
+      console.warn(
+        `[BugAnalyzer] Missing GEMINI_API_KEY. Setting default bug_analysis for detail ${detailId}.`,
+      );
       await supabase
         .from("execution_details")
         .update({
           analyzed: true,
           bug_analysis: {
-            summary: status === "passed" ? "Test case passed successfully." : "Test case failed during execution.",
+            summary:
+              status === "passed"
+                ? "Test case passed successfully."
+                : "Test case failed during execution.",
           },
         })
         .eq("id", detailId);
@@ -41,7 +50,10 @@ async function analyzeTestCaseBug(
     }
 
     const ai = new GoogleGenAI({ apiKey: key });
-    const modelName = process.env.STAGEHAND_MODEL || process.env.ZENI_MODEL || "gemini-3.5-flash-lite";
+    const modelName =
+      process.env.STAGEHAND_MODEL ||
+      process.env.ZENI_MODEL ||
+      "gemini-2.5-flash-lite";
 
     const cleanedSteps = (stepReports || [])
       .filter((s: any) => s.type !== "__meta__")
@@ -51,15 +63,18 @@ async function analyzeTestCaseBug(
         description: s.description,
         success: s.success,
         explanation: s.explanation,
-        error: s.error || s.actResult?.reasoning || s.validationResult?.explanation,
+        error:
+          s.error || s.actResult?.reasoning || s.validationResult?.explanation,
       }));
 
-    const cleanedNetwork = (networkReports || []).slice(0, 15).map((n: any) => ({
-      method: n.method,
-      url: n.url,
-      status: n.status,
-      time: n.time,
-    }));
+    const cleanedNetwork = (networkReports || [])
+      .slice(0, 15)
+      .map((n: any) => ({
+        method: n.method,
+        url: n.url,
+        status: n.status,
+        time: n.time,
+      }));
 
     const cleanedLogs = (logReports || []).slice(-20).map((l: any) => ({
       level: l.level,
@@ -87,7 +102,8 @@ Provide a concise summary explaining the result and any failure causes.`;
       properties: {
         summary: {
           type: Type.STRING,
-          description: "Concise summary of the test run result, explaining why it passed or failed based on steps, network calls, and logs.",
+          description:
+            "Concise summary of the test run result, explaining why it passed or failed based on steps, network calls, and logs.",
         },
       },
       required: ["summary"],
@@ -103,7 +119,9 @@ Provide a concise summary explaining the result and any failure causes.`;
       },
     });
 
-    const responseText = (response.text || "{}").replace(/```json\n?|\n?```/g, "").trim();
+    const responseText = (response.text || "{}")
+      .replace(/```json\n?|\n?```/g, "")
+      .trim();
     const bugAnalysisObj = JSON.parse(responseText);
 
     await supabase
@@ -114,15 +132,23 @@ Provide a concise summary explaining the result and any failure causes.`;
       })
       .eq("id", detailId);
 
-    console.log(`[BugAnalyzer ✅] Bug analysis completed and saved for detail ${detailId}`);
+    console.log(
+      `[BugAnalyzer ✅] Bug analysis completed and saved for detail ${detailId}`,
+    );
   } catch (err: any) {
-    console.error(`[BugAnalyzer Warning] Error generating bug analysis for detail ${detailId}:`, err);
+    console.error(
+      `[BugAnalyzer Warning] Error generating bug analysis for detail ${detailId}:`,
+      err,
+    );
     await supabase
       .from("execution_details")
       .update({
         analyzed: true,
         bug_analysis: {
-          summary: status === "passed" ? "Test case passed." : `Test case failed: ${err.message}`,
+          summary:
+            status === "passed"
+              ? "Test case passed."
+              : `Test case failed: ${err.message}`,
         },
       })
       .eq("id", detailId)
@@ -211,7 +237,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         .from("executions")
         .select(
           "id, number, title, status, environment, platforms, total_test_cases, passed_test_cases, failed_test_cases, skipped_test_cases, total_duration_ms, total_tokens_used, created_at, started_at, completed_at, user_id",
-          { count: "exact" }
+          { count: "exact" },
         )
         .order("created_at", { ascending: false })
         .range(offset, offset + limit - 1);
@@ -271,7 +297,10 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
       }
 
       if (!execution) {
-        return c.json({ success: false, error: `Execution "${id}" not found` }, 404);
+        return c.json(
+          { success: false, error: `Execution "${id}" not found` },
+          404,
+        );
       }
 
       const { data: detailsData } = await supabase
@@ -280,7 +309,9 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         .eq("execution_id", execution.id)
         .order("created_at", { ascending: true });
 
-      const detailsWithSignedUrls = await attachSignedUrlsToDetails(detailsData || []);
+      const detailsWithSignedUrls = await attachSignedUrlsToDetails(
+        detailsData || [],
+      );
 
       return c.json({
         success: true,
@@ -365,9 +396,10 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           ? `Execution: ${testCasesArray[0].title}`
           : `Execution Run ${new Date().toISOString()}`);
 
-      const executionPlatforms: string[] = Array.isArray(bodyPlatforms) && bodyPlatforms.length > 0
-        ? bodyPlatforms.map((p: any) => normalizePlatform(String(p)))
-        : [normalizePlatform(bodyPlatform)];
+      const executionPlatforms: string[] =
+        Array.isArray(bodyPlatforms) && bodyPlatforms.length > 0
+          ? bodyPlatforms.map((p: any) => normalizePlatform(String(p)))
+          : [normalizePlatform(bodyPlatform)];
 
       let execution: any = null;
       if (requestExecutionId) {
@@ -382,7 +414,9 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           const currentPlatforms: string[] = Array.isArray(existing.platforms)
             ? existing.platforms
             : [existing.environment || "web"];
-          const mergedPlatforms = Array.from(new Set([...currentPlatforms, ...executionPlatforms]));
+          const mergedPlatforms = Array.from(
+            new Set([...currentPlatforms, ...executionPlatforms]),
+          );
           await supabase
             .from("executions")
             .update({
@@ -462,7 +496,9 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           const executor = new Executor(wsUrl);
 
           await runConcurrentTasks(testCasesArray, parallel, async (tc) => {
-            const tcPlatform = normalizePlatform((tc as any).platform || bodyPlatform);
+            const tcPlatform = normalizePlatform(
+              (tc as any).platform || bodyPlatform,
+            );
             const { data: detailRecord } = await supabase
               .from("execution_details")
               .insert({
@@ -471,7 +507,12 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                 title: tc.title || "Untitled Test Case",
                 status: "running",
                 platform: tcPlatform,
-                target_url: tc.prodURL || tc.prodUrl || tc.localURL || tc.localUrl || null,
+                target_url:
+                  tc.prodURL ||
+                  tc.prodUrl ||
+                  tc.localURL ||
+                  tc.localUrl ||
+                  null,
                 started_at: new Date().toISOString(),
               })
               .select()
@@ -502,7 +543,8 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                 testCaseId: tc.id || "unknown",
                 title: tc.title || "Untitled",
                 overallSuccess: false,
-                targetURL: tc.prodURL || tc.prodUrl || tc.localURL || tc.localUrl || "",
+                targetURL:
+                  tc.prodURL || tc.prodUrl || tc.localURL || tc.localUrl || "",
                 stepReports: [],
                 totalExecutionTimeMs: Date.now() - startTime,
                 totalTokensUsed: 0,
@@ -544,10 +586,19 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                 specFile: tc.id ? `${tc.id}.yaml` : "test.yaml",
                 browser: "Chromium 124.0",
                 duration: `${(durationMs / 1000).toFixed(1)}s`,
-                url: tc.prodURL || tc.prodUrl || tc.localURL || tc.localUrl || execution.target_url || "—",
+                url:
+                  tc.prodURL ||
+                  tc.prodUrl ||
+                  tc.localURL ||
+                  tc.localUrl ||
+                  execution.target_url ||
+                  "—",
               },
             };
-            const processedStepReportsWithMeta = [...processedStepReports, metaItem];
+            const processedStepReportsWithMeta = [
+              ...processedStepReports,
+              metaItem,
+            ];
 
             if (detailRecord) {
               const updateData: any = sanitizeForJsonb({
@@ -567,7 +618,10 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                 .eq("id", detailRecord.id);
 
               if (updateErr) {
-                console.error("[Executions Route] Supabase update warning:", updateErr.message);
+                console.error(
+                  "[Executions Route] Supabase update warning:",
+                  updateErr.message,
+                );
                 await supabase
                   .from("execution_details")
                   .update({
@@ -587,7 +641,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                 processedStepReports,
                 report.networkReports || [],
                 report.logReports || [],
-                authUser.geminiApiKey
+                authUser.geminiApiKey,
               ).catch((e) => console.error("[BugAnalysis Error]:", e));
             }
 
@@ -654,7 +708,9 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
       const executor = new Executor(wsUrl);
 
       await runConcurrentTasks(testCasesArray, parallel, async (tc) => {
-        const tcPlatform = normalizePlatform((tc as any).platform || bodyPlatform);
+        const tcPlatform = normalizePlatform(
+          (tc as any).platform || bodyPlatform,
+        );
         const { data: detailRecord, error: detailErr } = await supabase
           .from("execution_details")
           .insert({
@@ -663,7 +719,8 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             title: tc.title || "Untitled Test Case",
             status: "running",
             platform: tcPlatform,
-            target_url: tc.prodURL || tc.prodUrl || tc.localURL || tc.localUrl || null,
+            target_url:
+              tc.prodURL || tc.prodUrl || tc.localURL || tc.localUrl || null,
             started_at: new Date().toISOString(),
           })
           .select()
@@ -682,7 +739,8 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             testCaseId: tc.id || "unknown",
             title: tc.title || "Untitled",
             overallSuccess: false,
-            targetURL: tc.prodURL || tc.prodUrl || tc.localURL || tc.localUrl || "",
+            targetURL:
+              tc.prodURL || tc.prodUrl || tc.localURL || tc.localUrl || "",
             stepReports: [],
             totalExecutionTimeMs: Date.now() - startTime,
             totalTokensUsed: 0,
@@ -729,10 +787,19 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             specFile: tc.id ? `${tc.id}.yaml` : "test.yaml",
             browser: "Chromium 124.0",
             duration: `${(durationMs / 1000).toFixed(1)}s`,
-            url: tc.prodURL || tc.prodUrl || tc.localURL || tc.localUrl || execution.target_url || "—",
+            url:
+              tc.prodURL ||
+              tc.prodUrl ||
+              tc.localURL ||
+              tc.localUrl ||
+              execution.target_url ||
+              "—",
           },
         };
-        const processedStepReportsWithMeta = [...processedStepReports, metaItem];
+        const processedStepReportsWithMeta = [
+          ...processedStepReports,
+          metaItem,
+        ];
 
         const updateData: any = sanitizeForJsonb({
           status: isSuccess ? "passed" : "failed",
@@ -757,11 +824,14 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           processedStepReports,
           report.networkReports || [],
           report.logReports || [],
-          authUser.geminiApiKey
+          authUser.geminiApiKey,
         ).catch((e) => console.error("[BugAnalysis Error]:", e));
 
         if (updateErr) {
-          console.error("[Executions Route] Supabase update warning:", updateErr.message);
+          console.error(
+            "[Executions Route] Supabase update warning:",
+            updateErr.message,
+          );
           await supabase
             .from("execution_details")
             .update({
@@ -984,7 +1054,10 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
       const { executionId } = body;
 
       if (!executionId) {
-        return c.json({ success: false, error: "Missing required executionId parameter" }, 400);
+        return c.json(
+          { success: false, error: "Missing required executionId parameter" },
+          400,
+        );
       }
 
       const { data: details } = await supabase
@@ -993,10 +1066,17 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         .eq("execution_id", executionId);
 
       const detailList = details || [];
-      const passedCount = detailList.filter((d) => d.status === "passed").length;
-      const failedCount = detailList.filter((d) => d.status === "failed").length;
+      const passedCount = detailList.filter(
+        (d) => d.status === "passed",
+      ).length;
+      const failedCount = detailList.filter(
+        (d) => d.status === "failed",
+      ).length;
       const totalCount = detailList.length;
-      const totalDurationMs = detailList.reduce((acc, d) => acc + (d.duration_ms || 0), 0);
+      const totalDurationMs = detailList.reduce(
+        (acc, d) => acc + (d.duration_ms || 0),
+        0,
+      );
       const overallStatus = failedCount > 0 ? "failed" : "completed";
 
       const { data: updatedExecution, error } = await supabase
@@ -1038,10 +1118,12 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
 
       const rawPlatform = (body.platform as string) || "ios";
       const normalizedPlatform = normalizePlatform(rawPlatform);
-      const runnerPlatform: "mobile-ios" | "mobile-android" = normalizedPlatform === "android" ? "mobile-android" : "mobile-ios";
+      const runnerPlatform: "mobile-ios" | "mobile-android" =
+        normalizedPlatform === "android" ? "mobile-android" : "mobile-ios";
       const appFile = body.appFile as File | undefined;
       const appUrlFromReq = body.appUrl as string | undefined;
-      const awsProjectArn = (body.awsProjectArn as string) || process.env.AWS_PROJECT_ARN;
+      const awsProjectArn =
+        (body.awsProjectArn as string) || process.env.AWS_PROJECT_ARN;
 
       let signedAppUrl = appUrlFromReq || "";
       let localSavedPath: string | undefined;
@@ -1059,11 +1141,16 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
       }
 
       if (!signedAppUrl) {
-        return c.json({ success: false, error: "App binary file or appUrl is required." }, 400);
+        return c.json(
+          { success: false, error: "App binary file or appUrl is required." },
+          400,
+        );
       }
 
-      const isStream = c.req.header("x-stream") === "true" || c.req.query("stream") === "true";
-      const requestExecutionId = (body.executionId as string) || (body.execution_id as string);
+      const isStream =
+        c.req.header("x-stream") === "true" || c.req.query("stream") === "true";
+      const requestExecutionId =
+        (body.executionId as string) || (body.execution_id as string);
 
       // 1. Create main 'executions' record in Supabase DB (or reuse existing)
       let executionRecord: any = null;
@@ -1079,7 +1166,9 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           const currentPlatforms: string[] = Array.isArray(existing.platforms)
             ? existing.platforms
             : [existing.environment || "web"];
-          const mergedPlatforms = Array.from(new Set([...currentPlatforms, normalizedPlatform]));
+          const mergedPlatforms = Array.from(
+            new Set([...currentPlatforms, normalizedPlatform]),
+          );
           await supabase
             .from("executions")
             .update({
@@ -1108,17 +1197,24 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           .single();
 
         if (execErr) {
-          console.error("[Mobile DB Warning] Failed to insert initial execution row:", execErr);
+          console.error(
+            "[Mobile DB Warning] Failed to insert initial execution row:",
+            execErr,
+          );
         } else {
           executionRecord = createdExec;
-          console.log(`[Mobile DB] Created execution record ID: ${executionRecord.id}`);
+          console.log(
+            `[Mobile DB] Created execution record ID: ${executionRecord.id}`,
+          );
         }
       }
 
       if (isStream) {
         return streamText(c, async (stream) => {
           if (executionRecord) {
-            await stream.writeln(JSON.stringify({ type: "init", executionId: executionRecord.id }));
+            await stream.writeln(
+              JSON.stringify({ type: "init", executionId: executionRecord.id }),
+            );
           }
 
           const mobileExecutor = new MobileExecutor(authUser.geminiApiKey);
@@ -1156,7 +1252,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                 totalSteps: tc.steps?.length || 1,
                 stepType: "INIT",
                 description: "Initializing Device...",
-              })
+              }),
             );
 
             const tcStartTime = Date.now();
@@ -1179,9 +1275,9 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                     totalSteps: tc.steps?.length || 1,
                     stepType: stepReport.type,
                     description: stepReport.description,
-                  })
+                  }),
                 );
-              }
+              },
             );
 
             const durationMs = Date.now() - tcStartTime;
@@ -1200,7 +1296,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                   executionRecord.id,
                   tc.id || "tc",
                   reportCopy.index,
-                  reportCopy.screenshotBase64
+                  reportCopy.screenshotBase64,
                 );
                 if (uploadResult) {
                   reportCopy.screenshotPath = uploadResult.path;
@@ -1210,7 +1306,10 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
               processedStepReports.push(reportCopy);
             }
 
-            const deviceName = runnerPlatform === "mobile-ios" ? "iPhone 15 Pro (iOS)" : "Pixel 8 Pro (Android)";
+            const deviceName =
+              runnerPlatform === "mobile-ios"
+                ? "iPhone 15 Pro (iOS)"
+                : "Pixel 8 Pro (Android)";
             const metaItem = {
               type: "__meta__",
               networkReports: report.networkReports || [],
@@ -1224,7 +1323,10 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                 url: signedAppUrl,
               },
             };
-            const processedStepReportsWithMeta = [...processedStepReports, metaItem];
+            const processedStepReportsWithMeta = [
+              ...processedStepReports,
+              metaItem,
+            ];
 
             if (detailRecord) {
               const updateData: any = sanitizeForJsonb({
@@ -1249,7 +1351,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                 processedStepReports,
                 report.networkReports || [],
                 report.logReports || [],
-                authUser.geminiApiKey
+                authUser.geminiApiKey,
               ).catch((e) => console.error("[BugAnalysis Error]:", e));
             }
 
@@ -1261,7 +1363,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                 status: isSuccess ? "PASSED" : "FAILED",
                 durationMs,
                 error: report.error,
-              })
+              }),
             );
           }
 
@@ -1287,7 +1389,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
               passedCount,
               failedCount,
               totalDurationMs,
-            })
+            }),
           );
         });
       }
@@ -1350,7 +1452,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
               executionRecord.id,
               tc.id || "tc",
               reportCopy.index,
-              reportCopy.screenshotBase64
+              reportCopy.screenshotBase64,
             );
             if (uploadResult) {
               reportCopy.screenshotPath = uploadResult.path;
@@ -1360,7 +1462,10 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           processedStepReports.push(reportCopy);
         }
 
-        const deviceName = runnerPlatform === "mobile-ios" ? "iPhone 15 Pro (iOS)" : "Pixel 8 Pro (Android)";
+        const deviceName =
+          runnerPlatform === "mobile-ios"
+            ? "iPhone 15 Pro (iOS)"
+            : "Pixel 8 Pro (Android)";
         const metaItem = {
           type: "__meta__",
           networkReports: report.networkReports || [],
@@ -1374,7 +1479,10 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             url: signedAppUrl,
           },
         };
-        const processedStepReportsWithMeta = [...processedStepReports, metaItem];
+        const processedStepReportsWithMeta = [
+          ...processedStepReports,
+          metaItem,
+        ];
 
         // 4. Update 'execution_details' record in Supabase DB
         if (detailRecord) {
@@ -1400,13 +1508,18 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             processedStepReports,
             report.networkReports || [],
             report.logReports || [],
-            authUser.geminiApiKey
+            authUser.geminiApiKey,
           ).catch((e) => console.error("[BugAnalysis Error]:", e));
 
           if (updateErr) {
-            console.error(`[Mobile DB Warning] Failed to update execution detail ${detailRecord.id}:`, updateErr);
+            console.error(
+              `[Mobile DB Warning] Failed to update execution detail ${detailRecord.id}:`,
+              updateErr,
+            );
           } else {
-            console.log(`[Mobile DB] Successfully saved execution details for test case "${tc.title}"`);
+            console.log(
+              `[Mobile DB] Successfully saved execution details for test case "${tc.title}"`,
+            );
           }
         }
       }
@@ -1426,7 +1539,9 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           })
           .eq("id", executionRecord.id);
 
-        console.log(`[Mobile DB] Completed execution record ${executionRecord.id} with status: ${finalStatus}`);
+        console.log(
+          `[Mobile DB] Completed execution record ${executionRecord.id} with status: ${finalStatus}`,
+        );
       }
 
       return c.json({

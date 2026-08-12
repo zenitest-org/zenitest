@@ -40,7 +40,8 @@ const MOBILE_ACT_SCHEMA = {
     },
     targetElementId: {
       type: Type.STRING,
-      description: "Accessibility ID, resource ID, or text label of target element",
+      description:
+        "Accessibility ID, resource ID, or text label of target element",
     },
     text: {
       type: Type.STRING,
@@ -91,7 +92,9 @@ export function extractMobileDom(xmlSource: string): DOMElement[] {
 
     // Extract attributes
     const getAttr = (key: string): string => {
-      const attrMatch = new RegExp(`${key}=["']([^"']*)["']`, "i").exec(attrString);
+      const attrMatch = new RegExp(`${key}=["']([^"']*)["']`, "i").exec(
+        attrString,
+      );
       return attrMatch ? attrMatch[1] : "";
     };
 
@@ -131,7 +134,9 @@ export function extractMobileDom(xmlSource: string): DOMElement[] {
       elements.push({
         id,
         tagName: type,
-        role: type.replace(/^XCUIElementType/, "").replace(/^android\.widget\./, ""),
+        role: type
+          .replace(/^XCUIElementType/, "")
+          .replace(/^android\.widget\./, ""),
         text: textContent,
         value: value,
         ariaLabel: label || name,
@@ -151,14 +156,16 @@ export function extractMobileDom(xmlSource: string): DOMElement[] {
  */
 export async function uploadAppBinaryToSupabase(
   appBufferOrPath: Buffer | string,
-  fileName: string = "app-binary"
+  fileName: string = "app-binary",
 ): Promise<string> {
   let fileBuffer: Buffer;
   let originalName = fileName;
 
   if (typeof appBufferOrPath === "string") {
     if (!existsSync(appBufferOrPath)) {
-      throw new Error(`Mobile app binary file not found at path: ${appBufferOrPath}`);
+      throw new Error(
+        `Mobile app binary file not found at path: ${appBufferOrPath}`,
+      );
     }
     fileBuffer = readFileSync(appBufferOrPath);
     originalName = basename(appBufferOrPath);
@@ -182,12 +189,17 @@ export async function uploadAppBinaryToSupabase(
     .from(bucketName)
     .list("builds", { search: targetFileName });
 
-  const isAlreadyUploaded = existingFiles && existingFiles.some((f) => f.name === targetFileName);
+  const isAlreadyUploaded =
+    existingFiles && existingFiles.some((f) => f.name === targetFileName);
 
   if (isAlreadyUploaded) {
-    console.log(`[Supabase Storage Cache HIT ⚡] App binary with checksum ${checksum.substring(0, 12)} already exists. Skipping re-upload!`);
+    console.log(
+      `[Supabase Storage Cache HIT ⚡] App binary with checksum ${checksum.substring(0, 12)} already exists. Skipping re-upload!`,
+    );
   } else {
-    console.log(`[Supabase Storage] Uploading ${originalName} (${(fileBuffer.length / (1024 * 1024)).toFixed(2)} MB, checksum: ${checksum.substring(0, 12)})...`);
+    console.log(
+      `[Supabase Storage] Uploading ${originalName} (${(fileBuffer.length / (1024 * 1024)).toFixed(2)} MB, checksum: ${checksum.substring(0, 12)})...`,
+    );
     const { error } = await supabase.storage
       .from(bucketName)
       .upload(storagePath, fileBuffer, {
@@ -196,7 +208,9 @@ export async function uploadAppBinaryToSupabase(
       });
 
     if (error) {
-      throw new Error(`Failed to upload mobile app binary to Supabase Storage: ${error.message}`);
+      throw new Error(
+        `Failed to upload mobile app binary to Supabase Storage: ${error.message}`,
+      );
     }
   }
 
@@ -214,10 +228,14 @@ export async function uploadAppBinaryToSupabase(
     .createSignedUrl(storagePath, 86400);
 
   if (signedError || !signedData?.signedUrl) {
-    throw new Error(`Failed to generate signed HTTPS URL from Supabase Storage: ${signedError?.message}`);
+    throw new Error(
+      `Failed to generate signed HTTPS URL from Supabase Storage: ${signedError?.message}`,
+    );
   }
 
-  console.log(`[Supabase Storage] Generated Signed HTTPS App URL: ${signedData.signedUrl}`);
+  console.log(
+    `[Supabase Storage] Generated Signed HTTPS App URL: ${signedData.signedUrl}`,
+  );
   return signedData.signedUrl;
 }
 
@@ -232,21 +250,32 @@ export class MobileExecutor {
   /**
    * Provisions AWS Device Farm session on fixed physical hardware ARNs.
    */
-  private async provisionAwsSession(
-    options: MobileExecutionOptions
-  ): Promise<{ awsClient: DeviceFarmClient; sessionArn: string; endpoint: string }> {
+  private async provisionAwsSession(options: MobileExecutionOptions): Promise<{
+    awsClient: DeviceFarmClient;
+    sessionArn: string;
+    endpoint: string;
+  }> {
     const region = options.awsRegion || process.env.AWS_REGION || "us-west-2";
-    const projectArn = options.awsProjectArn || process.env.AWS_PROJECT_ARN || process.env.AWS_TESTGRID_PROJECT_ARN;
+    const projectArn =
+      options.awsProjectArn ||
+      process.env.AWS_PROJECT_ARN ||
+      process.env.AWS_TESTGRID_PROJECT_ARN;
 
     if (!projectArn) {
-      throw new Error("AWS_PROJECT_ARN environment variable is required for AWS Device Farm execution.");
+      throw new Error(
+        "AWS_PROJECT_ARN environment variable is required for AWS Device Farm execution.",
+      );
     }
 
     const deviceArn =
-      options.platform === "mobile-ios" ? AWS_DEVICE_ARN_IOS : AWS_DEVICE_ARN_ANDROID;
+      options.platform === "mobile-ios"
+        ? AWS_DEVICE_ARN_IOS
+        : AWS_DEVICE_ARN_ANDROID;
 
     const awsClient = new DeviceFarmClient({ region });
-    console.log(`[AWS Device Farm] Provisioning hardware session on device: ${deviceArn}`);
+    console.log(
+      `[AWS Device Farm] Provisioning hardware session on device: ${deviceArn}`,
+    );
 
     const command = new CreateRemoteAccessSessionCommand({
       projectArn,
@@ -256,15 +285,19 @@ export class MobileExecutor {
     const res = await awsClient.send(command);
     const sessionArn = res.remoteAccessSession?.arn;
     if (!sessionArn) {
-      throw new Error("Failed to create AWS Device Farm Remote Access Session.");
+      throw new Error(
+        "Failed to create AWS Device Farm Remote Access Session.",
+      );
     }
 
-    console.log(`[AWS Device Farm] Session created: ${sessionArn}. Polling status...`);
+    console.log(
+      `[AWS Device Farm] Session created: ${sessionArn}. Polling status...`,
+    );
     let endpoint = "";
 
     while (true) {
       const statusRes = await awsClient.send(
-        new GetRemoteAccessSessionCommand({ arn: sessionArn })
+        new GetRemoteAccessSessionCommand({ arn: sessionArn }),
       );
       const session = statusRes.remoteAccessSession;
       console.log(`[AWS Device Farm] Session status: ${session?.status}`);
@@ -278,7 +311,9 @@ export class MobileExecutor {
         session?.status === "STOPPED" ||
         session?.status === "COMPLETED"
       ) {
-        throw new Error(`AWS Device Farm session failed with status: ${session?.status}`);
+        throw new Error(
+          `AWS Device Farm session failed with status: ${session?.status}`,
+        );
       }
       await new Promise((r) => setTimeout(r, 5000));
     }
@@ -294,7 +329,7 @@ export class MobileExecutor {
   public async executeTestCase(
     testCase: TestCase,
     options: MobileExecutionOptions,
-    onStepReport?: (report: StepExecutionReport) => void
+    onStepReport?: (report: StepExecutionReport) => void,
   ): Promise<TestCaseExecutionReport> {
     const startTime = Date.now();
     let totalTokensUsed = 0;
@@ -302,10 +337,16 @@ export class MobileExecutor {
     const logReports: LogReportItem[] = [];
     const networkReports: NetworkReportItem[] = [];
 
-    console.log(`\n=====================================================================================`);
-    console.log(`[MobileExecutor] STARTING TEST CASE: "${testCase.title}" (${testCase.id})`);
+    console.log(
+      `\n=====================================================================================`,
+    );
+    console.log(
+      `[MobileExecutor] STARTING TEST CASE: "${testCase.title}" (${testCase.id})`,
+    );
     console.log(`[MobileExecutor] Target Platform: ${options.platform}`);
-    console.log(`=====================================================================================\n`);
+    console.log(
+      `=====================================================================================\n`,
+    );
 
     if (onStepReport) {
       onStepReport({
@@ -326,12 +367,15 @@ export class MobileExecutor {
     } else if (!signedAppUrl && options.appBuffer) {
       signedAppUrl = await uploadAppBinaryToSupabase(
         options.appBuffer,
-        options.appFileName || `app_${Date.now()}.${options.platform === "mobile-ios" ? "ipa" : "apk"}`
+        options.appFileName ||
+          `app_${Date.now()}.${options.platform === "mobile-ios" ? "ipa" : "apk"}`,
       );
     }
 
     if (!signedAppUrl) {
-      throw new Error("Mandatory Supabase Signed App HTTPS URL could not be resolved.");
+      throw new Error(
+        "Mandatory Supabase Signed App HTTPS URL could not be resolved.",
+      );
     }
 
     let awsClient: DeviceFarmClient | undefined;
@@ -346,7 +390,9 @@ export class MobileExecutor {
         sessionArn = awsSession.sessionArn;
 
         const parsedEndpoint = new URL(awsSession.endpoint);
-        console.log(`[MobileExecutor] Connecting WebdriverIO to AWS remote endpoint (${parsedEndpoint.hostname})...`);
+        console.log(
+          `[MobileExecutor] Connecting WebdriverIO to AWS remote endpoint (${parsedEndpoint.hostname})...`,
+        );
         driver = await remote({
           hostname: parsedEndpoint.hostname,
           path: parsedEndpoint.pathname + parsedEndpoint.search,
@@ -361,11 +407,17 @@ export class MobileExecutor {
             "appium:newCommandTimeout": 300,
           },
         });
-        console.log(`[MobileExecutor] WebdriverIO session established on AWS hardware.`);
+        console.log(
+          `[MobileExecutor] WebdriverIO session established on AWS hardware.`,
+        );
       } else {
         // Connect to local Appium server
-        const targetAppPath = options.appFilePath ? options.appFilePath : signedAppUrl;
-        console.log(`[MobileExecutor] Connecting to Local Appium server at http://127.0.0.1:4723 (app: ${targetAppPath})...`);
+        const targetAppPath = options.appFilePath
+          ? options.appFilePath
+          : signedAppUrl;
+        console.log(
+          `[MobileExecutor] Connecting to Local Appium server at http://127.0.0.1:4723 (app: ${targetAppPath})...`,
+        );
         driver = await remote({
           hostname: "127.0.0.1",
           port: 4723,
@@ -378,7 +430,9 @@ export class MobileExecutor {
             "appium:newCommandTimeout": 300,
           },
         });
-        console.log(`[MobileExecutor] WebdriverIO session established on Local Appium.`);
+        console.log(
+          `[MobileExecutor] WebdriverIO session established on Local Appium.`,
+        );
       }
 
       let overallSuccess = true;
@@ -393,7 +447,9 @@ export class MobileExecutor {
         let screenshotBase64: string | undefined;
         let stepTokens = 0;
 
-        console.log(`\n[MobileExecutor Step ${step.index}/${testCase.steps.length}] [${step.type.toUpperCase()}] ${step.description}`);
+        console.log(
+          `\n[MobileExecutor Step ${step.index}/${testCase.steps.length}] [${step.type.toUpperCase()}] ${step.description}`,
+        );
 
         try {
           // Take screenshot
@@ -409,24 +465,41 @@ export class MobileExecutor {
             explanation = `App launched with binary URI: ${signedAppUrl}`;
             await driver.pause(1000).catch(() => {});
             const postShot = await driver.takeScreenshot().catch(() => null);
-            if (postShot) screenshotBase64 = `data:image/png;base64,${postShot}`;
+            if (postShot)
+              screenshotBase64 = `data:image/png;base64,${postShot}`;
           } else if (step.type === "act") {
-            const cacheKey = this.cache.generateKey(step.description, mobileDom, options.platform, "mobile-act");
+            const cacheKey = this.cache.generateKey(
+              step.description,
+              mobileDom,
+              options.platform,
+              "mobile-act",
+            );
             const cachedActResult = this.cache.get<ActResult>(cacheKey);
 
             if (cachedActResult) {
-              console.log(`[MobileExecutor Cache HIT] Reusing cached action for step ${step.index}: ${cachedActResult.action}`);
+              console.log(
+                `[MobileExecutor Cache HIT] Reusing cached action for step ${step.index}: ${cachedActResult.action}`,
+              );
               actResult = cachedActResult;
-              stepSuccess = actResult.action !== "done" || !actResult.reasoning.includes("failed");
+              stepSuccess =
+                actResult.action !== "done" ||
+                !actResult.reasoning.includes("failed");
               explanation = `${actResult.reasoning} (Cached)`;
               if (actResult.targetElementId) {
                 await this.performMobileAction(driver, actResult);
               }
             } else {
-              const res = await this.executeActStep(driver, step.description, mobileDom, screenshotBase64);
+              const res = await this.executeActStep(
+                driver,
+                step.description,
+                mobileDom,
+                screenshotBase64,
+              );
               actResult = res.actResult;
               stepTokens = res.tokensUsed;
-              stepSuccess = actResult.action !== "done" || !actResult.reasoning.includes("failed");
+              stepSuccess =
+                actResult.action !== "done" ||
+                !actResult.reasoning.includes("failed");
               explanation = actResult.reasoning;
               this.cache.set(cacheKey, actResult);
             }
@@ -438,16 +511,27 @@ export class MobileExecutor {
               screenshotBase64 = `data:image/png;base64,${postShot}`;
             }
           } else if (step.type === "validate") {
-            const cacheKey = this.cache.generateKey(step.description, mobileDom, options.platform, "mobile-validate");
+            const cacheKey = this.cache.generateKey(
+              step.description,
+              mobileDom,
+              options.platform,
+              "mobile-validate",
+            );
             const cachedValResult = this.cache.get<StepResult>(cacheKey);
 
             if (cachedValResult) {
-              console.log(`[MobileExecutor Cache HIT] Reusing cached validation for step ${step.index}: success=${cachedValResult.success}`);
+              console.log(
+                `[MobileExecutor Cache HIT] Reusing cached validation for step ${step.index}: success=${cachedValResult.success}`,
+              );
               validationResult = cachedValResult;
               stepSuccess = validationResult.success;
               explanation = `${validationResult.explanation} (Cached)`;
             } else {
-              const res = await this.executeValidateStep(step.description, mobileDom, screenshotBase64);
+              const res = await this.executeValidateStep(
+                step.description,
+                mobileDom,
+                screenshotBase64,
+              );
               validationResult = res.validationResult;
               stepTokens = res.tokensUsed;
               stepSuccess = validationResult.success;
@@ -464,7 +548,9 @@ export class MobileExecutor {
         if (!stepSuccess) overallSuccess = false;
         totalTokensUsed += stepTokens;
 
-        console.log(`[MobileExecutor Step ${step.index}] ${stepSuccess ? "PASSED ✅" : "FAILED ❌"} (${stepDuration}ms, ${stepTokens} tokens): ${explanation}`);
+        console.log(
+          `[MobileExecutor Step ${step.index}] ${stepSuccess ? "PASSED ✅" : "FAILED ❌"} (${stepDuration}ms, ${stepTokens} tokens): ${explanation}`,
+        );
 
         const report: StepExecutionReport = {
           index: step.index,
@@ -485,7 +571,9 @@ export class MobileExecutor {
         if (!stepSuccess) break;
       }
 
-      console.log(`\n[MobileExecutor] Overall Result for "${testCase.title}": ${overallSuccess ? "PASSED ✅" : "FAILED ❌"}`);
+      console.log(
+        `\n[MobileExecutor] Overall Result for "${testCase.title}": ${overallSuccess ? "PASSED ✅" : "FAILED ❌"}`,
+      );
 
       return {
         testCaseId: testCase.id,
@@ -499,8 +587,12 @@ export class MobileExecutor {
         totalTokensUsed,
       };
     } finally {
-      console.log(`\n=====================================================================================`);
-      console.log(`[MobileExecutor] CLOSING SESSION FOR TEST CASE: "${testCase.title}"`);
+      console.log(
+        `\n=====================================================================================`,
+      );
+      console.log(
+        `[MobileExecutor] CLOSING SESSION FOR TEST CASE: "${testCase.title}"`,
+      );
       if (driver) {
         try {
           const logTypes = await driver.getLogTypes().catch(() => []);
@@ -559,33 +651,47 @@ export class MobileExecutor {
           ];
 
           for (const entry of driverLogs.slice(-200)) {
-            const rawMsg = typeof entry === "string" ? entry : entry.message || JSON.stringify(entry);
+            const rawMsg =
+              typeof entry === "string"
+                ? entry
+                : entry.message || JSON.stringify(entry);
             const cleanMsg = rawMsg.replace(/\u0000/g, "").trim();
             if (!cleanMsg) continue;
 
             const isDaemonLog = SYSTEM_DAEMON_PATTERNS.some((p) =>
-              cleanMsg.toLowerCase().includes(p.toLowerCase())
+              cleanMsg.toLowerCase().includes(p.toLowerCase()),
             );
             if (isDaemonLog) continue;
 
-            const level = (entry.level || "").toLowerCase().includes("err") ? "error" : (entry.level || "").toLowerCase().includes("warn") ? "warn" : "info";
+            const level = (entry.level || "").toLowerCase().includes("err")
+              ? "error"
+              : (entry.level || "").toLowerCase().includes("warn")
+                ? "warn"
+                : "info";
             logReports.push({
               id: `l-${logReports.length + 1}`,
-              timestamp: entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString(),
+              timestamp: entry.timestamp
+                ? new Date(entry.timestamp).toLocaleTimeString()
+                : new Date().toLocaleTimeString(),
               level,
               message: cleanMsg,
             });
           }
 
           if (logTypes.includes("performance")) {
-            const perfLogs = await driver.getLogs("performance").catch(() => []);
+            const perfLogs = await driver
+              .getLogs("performance")
+              .catch(() => []);
             for (const entry of perfLogs) {
               try {
                 const message = JSON.parse(entry.message).message;
                 if (message.method === "Network.responseReceived") {
                   const params = message.params;
                   const response = params.response;
-                  if (response.url.includes("127.0.0.1:4723") || response.url.includes("wd/hub")) {
+                  if (
+                    response.url.includes("127.0.0.1:4723") ||
+                    response.url.includes("wd/hub")
+                  ) {
                     continue;
                   }
                   networkReports.push({
@@ -605,28 +711,45 @@ export class MobileExecutor {
         } catch (_) {}
 
         try {
-          console.log(`[MobileExecutor] Deleting WebdriverIO driver session...`);
+          console.log(
+            `[MobileExecutor] Deleting WebdriverIO driver session...`,
+          );
           await driver.deleteSession();
           console.log(`[MobileExecutor] WebdriverIO driver session deleted.`);
         } catch (err: any) {
-          console.log(`[MobileExecutor Warning] Error deleting driver session: ${err.message}`);
+          console.log(
+            `[MobileExecutor Warning] Error deleting driver session: ${err.message}`,
+          );
         }
       }
 
       if (awsClient && sessionArn) {
         try {
-          console.log(`[MobileExecutor] Issuing StopRemoteAccessSessionCommand for AWS session: ${sessionArn}...`);
-          await awsClient.send(new StopRemoteAccessSessionCommand({ arn: sessionArn }));
-          console.log(`[MobileExecutor] AWS Device Farm remote access session terminated cleanly.`);
+          console.log(
+            `[MobileExecutor] Issuing StopRemoteAccessSessionCommand for AWS session: ${sessionArn}...`,
+          );
+          await awsClient.send(
+            new StopRemoteAccessSessionCommand({ arn: sessionArn }),
+          );
+          console.log(
+            `[MobileExecutor] AWS Device Farm remote access session terminated cleanly.`,
+          );
         } catch (err: any) {
-          console.log(`[MobileExecutor Warning] Error stopping AWS session: ${err.message}`);
+          console.log(
+            `[MobileExecutor Warning] Error stopping AWS session: ${err.message}`,
+          );
         }
       }
-      console.log(`=====================================================================================\n`);
+      console.log(
+        `=====================================================================================\n`,
+      );
     }
   }
 
-  private async performMobileAction(driver: any, parsed: ActResult): Promise<void> {
+  private async performMobileAction(
+    driver: any,
+    parsed: ActResult,
+  ): Promise<void> {
     if (parsed.action === "click" || parsed.action === "type") {
       const targetId = String(parsed.targetElementId || "");
       const elem = await driver.$(`~${targetId}`);
@@ -637,10 +760,13 @@ export class MobileExecutor {
           await elem.setValue(parsed.text || "");
         }
       } else {
-        const textElem = await driver.$(`//*[contains(@name, "${targetId}") or contains(@label, "${targetId}")]`);
+        const textElem = await driver.$(
+          `//*[contains(@name, "${targetId}") or contains(@label, "${targetId}")]`,
+        );
         if (await textElem.isExisting()) {
           if (parsed.action === "click") await textElem.click();
-          else if (parsed.action === "type") await textElem.setValue(parsed.text || "");
+          else if (parsed.action === "type")
+            await textElem.setValue(parsed.text || "");
         }
       }
     }
@@ -653,7 +779,7 @@ export class MobileExecutor {
     driver: any,
     instruction: string,
     dom: DOMElement[],
-    screenshotBase64?: string
+    screenshotBase64?: string,
   ): Promise<{ actResult: ActResult; tokensUsed: number }> {
     const userText = `You are a mobile automation assistant executing a step on an app screen.
 Instruction: "${instruction}"
@@ -663,7 +789,10 @@ ${JSON.stringify(dom, null, 2)}`;
 
     const actParts: any[] = [{ text: userText }];
     if (screenshotBase64) {
-      const cleanBase64 = screenshotBase64.replace(/^data:image\/\w+;base64,/, "");
+      const cleanBase64 = screenshotBase64.replace(
+        /^data:image\/\w+;base64,/,
+        "",
+      );
       actParts.push({
         inlineData: {
           mimeType: "image/png",
@@ -672,7 +801,10 @@ ${JSON.stringify(dom, null, 2)}`;
       });
     }
 
-    const modelName = process.env.STAGEHAND_MODEL || process.env.ZENI_MODEL || "gemini-3.5-flash-lite";
+    const modelName =
+      process.env.STAGEHAND_MODEL ||
+      process.env.ZENI_MODEL ||
+      "gemini-2.5-flash-lite";
     const response = await this.ai.models.generateContent({
       model: modelName,
       contents: [
@@ -688,7 +820,9 @@ ${JSON.stringify(dom, null, 2)}`;
       },
     });
 
-    const responseText = (response.text || "{}").replace(/```json\n?|\n?```/g, "").trim();
+    const responseText = (response.text || "{}")
+      .replace(/```json\n?|\n?```/g, "")
+      .trim();
     const parsed: ActResult = JSON.parse(responseText);
     const tokensUsed = response.usageMetadata?.totalTokenCount ?? 0;
 
@@ -703,7 +837,7 @@ ${JSON.stringify(dom, null, 2)}`;
   private async executeValidateStep(
     condition: string,
     dom: DOMElement[],
-    screenshotBase64?: string
+    screenshotBase64?: string,
   ): Promise<{ validationResult: StepResult; tokensUsed: number }> {
     const userText = `You are a mobile QA validator verifying screen state.
 Condition to verify: "${condition}"
@@ -713,7 +847,10 @@ ${JSON.stringify(dom, null, 2)}`;
 
     const valParts: any[] = [{ text: userText }];
     if (screenshotBase64) {
-      const cleanBase64 = screenshotBase64.replace(/^data:image\/\w+;base64,/, "");
+      const cleanBase64 = screenshotBase64.replace(
+        /^data:image\/\w+;base64,/,
+        "",
+      );
       valParts.push({
         inlineData: {
           mimeType: "image/png",
@@ -722,7 +859,10 @@ ${JSON.stringify(dom, null, 2)}`;
       });
     }
 
-    const modelName = process.env.STAGEHAND_MODEL || process.env.ZENI_MODEL || "gemini-3.5-flash-lite";
+    const modelName =
+      process.env.STAGEHAND_MODEL ||
+      process.env.ZENI_MODEL ||
+      "gemini-2.5-flash-lite";
     const response = await this.ai.models.generateContent({
       model: modelName,
       contents: [
@@ -738,7 +878,9 @@ ${JSON.stringify(dom, null, 2)}`;
       },
     });
 
-    const responseText = (response.text || "{}").replace(/```json\n?|\n?```/g, "").trim();
+    const responseText = (response.text || "{}")
+      .replace(/```json\n?|\n?```/g, "")
+      .trim();
     const validationResult = JSON.parse(responseText) as StepResult;
     const tokensUsed = response.usageMetadata?.totalTokenCount ?? 0;
 
@@ -747,5 +889,9 @@ ${JSON.stringify(dom, null, 2)}`;
 }
 
 function parsedTargetId(targetElementId: any): boolean {
-  return targetElementId !== undefined && targetElementId !== null && String(targetElementId).trim() !== "";
+  return (
+    targetElementId !== undefined &&
+    targetElementId !== null &&
+    String(targetElementId).trim() !== ""
+  );
 }

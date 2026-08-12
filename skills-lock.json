@@ -31,6 +31,12 @@
       "skillPath": "skills/core/clerk-setup/SKILL.md",
       "computedHash": "2142fbbf99008c3152e7044730e57d6063b26a9f2523da1fd21a83f6207a2b81"
     },
+    "creem": {
+      "source": "armitage-labs/creem-skills",
+      "sourceType": "github",
+      "skillPath": "creem-api/skills/creem/SKILL.md",
+      "computedHash": "9287e58b5b72beece979c1005839c6f595f44320c77bdcf1f13cf662799dea37"
+    },
     "hugeicons": {
       "source": "hugeicons/hugeicons",
       "sourceType": "github",
