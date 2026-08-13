@@ -179,7 +179,7 @@ function RunsTable() {
       {/* Table Container Card */}
       <div className="rounded-xl border border-zinc-200/80 dark:border-zinc-800/80 bg-white dark:bg-zinc-950 shadow-xs overflow-hidden">
         {/* Controls Toolbar */}
-        <div className="p-3.5 sm:px-5 border-b border-zinc-200/80 dark:border-zinc-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-zinc-50/50 dark:bg-zinc-900/30">
+        <div className="p-3.5 sm:px-5 border-b border-zinc-200/80 dark:border-zinc-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-zinc-950">
           <div className="relative flex-1 max-w-sm">
             <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
             <input
@@ -213,7 +213,7 @@ function RunsTable() {
         {/* Table Body */}
         <div className="relative w-full overflow-x-auto">
           <table className="w-full text-xs text-left">
-            <thead className="bg-zinc-50/80 dark:bg-zinc-900/40 text-[11px] font-medium tracking-wider uppercase text-muted-foreground border-b border-zinc-200/80 dark:border-zinc-800/80">
+            <thead className="bg-white dark:bg-zinc-950 text-[11px] font-medium tracking-wider uppercase text-muted-foreground border-b border-zinc-200/80 dark:border-zinc-800/80">
               <tr>
                 <th className="px-5 py-3 font-semibold">Run ID</th>
                 <th className="px-5 py-3 font-semibold">Status</th>
