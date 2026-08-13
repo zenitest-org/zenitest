@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { Clock02Icon, Settings01Icon } from "@hugeicons/core-free-icons";
+import { Clock02Icon, Settings01Icon, Book02Icon } from "@hugeicons/core-free-icons";
 
 export type SidebarNavItem = {
   title: string;
@@ -8,6 +8,7 @@ export type SidebarNavItem = {
   icon?: ReactNode;
   isActive?: boolean;
   isModal?: boolean;
+  isExternal?: boolean;
   subItems?: SidebarNavItem[];
 };
 
@@ -29,10 +30,17 @@ export const navGroups: SidebarNavGroup[] = [
         path: "/settings",
         icon: <HugeiconsIcon icon={Settings01Icon} strokeWidth={2.2} />,
       },
-
+      {
+        title: "Documentation",
+        path: "https://docs.zenitest.ai",
+        icon: <HugeiconsIcon icon={Book02Icon} strokeWidth={2.2} />,
+        isExternal: true,
+      },
     ],
   },
 ];
+
+
 
 export const footerNavLinks: SidebarNavItem[] = [];
 

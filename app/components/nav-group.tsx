@@ -54,6 +54,21 @@ export function NavGroup({ label, items }: SidebarNavGroup) {
 							);
 						}
 
+						if (item.isExternal) {
+							return (
+								<SidebarMenuItem key={item.title}>
+									<SidebarMenuButton
+										tooltip={item.title}
+										render={<a href={item.path} target="_blank" rel="noopener noreferrer" />}
+									>
+										{item.icon}
+										<span>{item.title}</span>
+									</SidebarMenuButton>
+								</SidebarMenuItem>
+							);
+						}
+
+
 						return (
 							<Collapsible className="group/collapsible" defaultOpen={
 								isActive || item.subItems?.some((i) => i.path === pathname)

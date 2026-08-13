@@ -17,9 +17,8 @@ import {
   SmartphoneIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -52,43 +51,14 @@ interface RunItem {
 
 export function PlatformBadge({ platform }: { platform: string }) {
   const norm = platform.toLowerCase().trim();
-  if (norm === "web") {
-    return (
-      <Badge
-        variant="outline"
-        className="bg-sky-50 text-sky-700 border-sky-300 gap-1 dark:bg-sky-950/60 dark:text-sky-300 dark:border-sky-700 font-normal text-[11px]"
-      >
-        <GlobeIcon className="size-3" />
-        Web
-      </Badge>
-    );
-  }
-  if (norm === "ios") {
-    return (
-      <Badge
-        variant="outline"
-        className="bg-purple-50 text-purple-700 border-purple-300 gap-1 dark:bg-purple-950/60 dark:text-purple-300 dark:border-purple-700 font-normal text-[11px]"
-      >
-        <SmartphoneIcon className="size-3" />
-        iOS
-      </Badge>
-    );
-  }
-  if (norm === "android") {
-    return (
-      <Badge
-        variant="outline"
-        className="bg-emerald-50 text-emerald-700 border-emerald-300 gap-1 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-700 font-normal text-[11px]"
-      >
-        <SmartphoneIcon className="size-3" />
-        Android
-      </Badge>
-    );
-  }
+  const icon = norm === "web" ? <GlobeIcon className="size-3" /> : <SmartphoneIcon className="size-3" />;
+  const label = norm === "web" ? "Web" : norm === "ios" ? "iOS" : norm === "android" ? "Android" : platform;
+
   return (
-    <Badge variant="outline" className="font-normal text-[11px]">
-      {platform}
-    </Badge>
+    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border border-zinc-200/60 dark:border-zinc-800 shrink-0">
+      {icon}
+      <span>{label}</span>
+    </span>
   );
 }
 
@@ -197,171 +167,198 @@ function RunsTable() {
     return matchesSearch && matchesStatus;
   });
 
+  const statusOptions = [
+    { value: "all", label: "All Status" },
+    { value: "passed", label: "Passed" },
+    { value: "failed", label: "Failed" },
+    { value: "running", label: "Running" },
+  ];
+
   return (
-    <div className="space-y-3">
-      <Card className="py-0 gap-0">
-        <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-2">
-          <div className="relative w-full sm:w-72">
-            <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
-            <Input
+    <div className="space-y-4">
+      {/* Table Container Card */}
+      <div className="rounded-xl border border-zinc-200/80 dark:border-zinc-800/80 bg-white dark:bg-zinc-950 shadow-xs overflow-hidden">
+        {/* Controls Toolbar */}
+        <div className="p-3.5 sm:px-5 border-b border-zinc-200/80 dark:border-zinc-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-zinc-50/50 dark:bg-zinc-900/30">
+          <div className="relative flex-1 max-w-sm">
+            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+            <input
+              type="text"
               placeholder="Search test suite or run ID..."
               value={searchQuery}
               onChange={(e) => updateParams(e.target.value, statusFilter, 1)}
-              className="pl-8 h-8 text-xs border-none shadow-none bg-transparent dark:bg-transparent focus-visible:ring-0 focus-visible:border-none focus:outline-none"
+              className="w-full pl-9 pr-3 py-1.5 text-xs text-foreground bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 rounded-lg focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-600 transition-all placeholder:text-muted-foreground"
             />
           </div>
 
-          <div className="relative">
-            <select
-              value={statusFilter}
-              onChange={(e) => updateParams(searchQuery, e.target.value, 1)}
-              className="h-8 rounded-md border-none bg-background px-3 py-1 pr-8 text-xs font-medium text-foreground cursor-pointer focus:outline-none focus:ring-0 appearance-none shadow-none"
-            >
-              <option value="all">All Status</option>
-              <option value="passed">Passed</option>
-              <option value="failed">Failed</option>
-              <option value="running">Running</option>
-            </select>
-            <ChevronDownIcon className="absolute right-2.5 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" />
+          <div className="flex items-center gap-1 bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 p-0.5 rounded-lg shrink-0">
+            {statusOptions.map((opt) => (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => updateParams(searchQuery, opt.value, 1)}
+                className={cn(
+                  "px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer",
+                  statusFilter === opt.value
+                    ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs"
+                    : "text-muted-foreground hover:text-foreground hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
+                )}
+              >
+                {opt.label}
+              </button>
+            ))}
           </div>
-        </CardHeader>
-        <CardContent className="p-0">
-          <div className="relative w-full overflow-auto">
-            <table className="w-full text-sm text-left">
-              <thead className="bg-muted/50 text-xs uppercase text-muted-foreground border-y">
+        </div>
+
+        {/* Table Body */}
+        <div className="relative w-full overflow-x-auto">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-zinc-50/80 dark:bg-zinc-900/40 text-[11px] font-medium tracking-wider uppercase text-muted-foreground border-b border-zinc-200/80 dark:border-zinc-800/80">
+              <tr>
+                <th className="px-5 py-3 font-semibold">Run ID</th>
+                <th className="px-5 py-3 font-semibold">Status</th>
+                <th className="px-5 py-3 font-semibold">Platforms</th>
+                <th className="px-5 py-3 font-semibold">Passed</th>
+                <th className="px-5 py-3 font-semibold text-right">Time</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/50">
+              {isLoading ? (
                 <tr>
-                  <th className="px-6 py-3 font-semibold">Run ID</th>
-                  <th className="px-6 py-3 font-semibold">Status</th>
-                  <th className="px-6 py-3 font-semibold">Platforms</th>
-                  <th className="px-6 py-3 font-semibold">Passed</th>
-                  <th className="px-6 py-3 font-semibold">Duration</th>
-                  <th className="px-6 py-3 font-semibold">Time</th>
+                  <td colSpan={5} className="px-5 py-10 text-center text-muted-foreground">
+                    <RefreshCwIcon className="size-4 animate-spin mx-auto mb-2 text-foreground" />
+                    <span>Loading test runs...</span>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y">
-                {isLoading ? (
-                  <tr>
-                    <td colSpan={6} className="px-6 py-8 text-center text-muted-foreground text-xs">
-                      <RefreshCwIcon className="size-4 animate-spin mx-auto mb-2" />
-                      Loading executions...
+              ) : filteredRuns.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-5 py-12 text-center">
+                    <div className="flex flex-col items-center justify-center max-w-sm mx-auto space-y-3">
+                      <div className="size-10 rounded-full bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center text-foreground border border-zinc-200/80 dark:border-zinc-800">
+                        <RocketIcon className="size-5" />
+                      </div>
+                      <div className="space-y-1">
+                        <h3 className="text-xs font-semibold text-foreground">No test executions found</h3>
+                        <p className="text-xs text-muted-foreground leading-relaxed">
+                          Run tests using the CLI runner or check your search filters.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 pt-1">
+                        <Button
+                          size="sm"
+                          onClick={() => setSettingsModalOpen(true)}
+                          className="h-8 text-xs font-medium cursor-pointer"
+                        >
+                          Get started
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => router.push("/installation")}
+                          className="h-8 text-xs font-medium cursor-pointer"
+                        >
+                          <BookOpenIcon className="size-3.5 mr-1.5" />
+                          Read docs
+                        </Button>
+                      </div>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                filteredRuns.map((run) => (
+                  <tr
+                    key={run.id}
+                    className={cn(
+                      "transition-colors",
+                      run.status === "running"
+                        ? "cursor-not-allowed opacity-80 select-none bg-sky-50/20 dark:bg-sky-950/10"
+                        : "hover:bg-zinc-50/80 dark:hover:bg-zinc-900/40 cursor-pointer"
+                    )}
+                    onClick={() => {
+                      if (run.status === "running") return;
+                      router.push(`/runs/${run.id}`);
+                    }}
+                  >
+                    <td className="px-5 py-3.5 font-medium text-foreground">
+                      <span className="font-mono text-xs font-bold text-foreground">
+                        {run.number ? `#${run.number}` : run.id}
+                      </span>
                     </td>
-                  </tr>
-                ) : filteredRuns.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center">
-                      <div className="flex flex-col items-center justify-center max-w-sm mx-auto space-y-3">
-                        <div className="size-10 rounded-full bg-muted/60 flex items-center justify-center text-muted-foreground border border-border/40">
-                          <RocketIcon className="size-5" />
-                        </div>
-                        <div className="space-y-1">
-                          <h3 className="text-sm font-semibold text-foreground">
-                            No test executions found
-                          </h3>
-                          <p className="text-xs text-muted-foreground leading-relaxed">
-                            Set up your ZeniTest CLI or API key to start running automated test suites.
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2 pt-1">
-                          <Button
-                            size="sm"
-                            onClick={() => setSettingsModalOpen(true)}
-                            className="h-8 text-xs font-medium cursor-pointer"
-                          >
-                            Get started
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => router.push("/installation")}
-                            className="h-8 text-xs font-medium cursor-pointer"
-                          >
-                            <BookOpenIcon className="size-3.5 mr-1.5" />
-                            Read docs
-                          </Button>
-                        </div>
+
+                    <td className="px-5 py-3.5">
+                      {run.status === "passed" && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20">
+                          <CheckCircle2Icon className="size-3" />
+                          <span>Passed</span>
+                        </span>
+                      )}
+                      {run.status === "failed" && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/20">
+                          <XCircleIcon className="size-3" />
+                          <span>Failed</span>
+                        </span>
+                      )}
+                      {run.status === "running" && (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium text-sky-600 dark:text-sky-400 bg-sky-500/10 border border-sky-500/20">
+                          <RefreshCwIcon className="size-3 animate-spin" />
+                          <span>Running</span>
+                        </span>
+                      )}
+                    </td>
+
+                    <td className="px-5 py-3.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {run.platforms.map((plat) => (
+                          <PlatformBadge key={plat} platform={plat} />
+                        ))}
                       </div>
                     </td>
-                  </tr>
-                ) : (
-                  filteredRuns.map((run) => (
-                    <tr
-                      key={run.id}
-                      className={cn(
-                        "transition-colors",
-                        run.status === "running"
-                          ? "cursor-not-allowed opacity-80 select-none"
-                          : "hover:bg-muted/40 cursor-pointer"
-                      )}
-                      onClick={() => {
-                        if (run.status === "running") return;
-                        router.push(`/runs/${run.id}`);
-                      }}
-                    >
-                      <td className="px-6 py-4 font-medium text-foreground">
-                        <span className="font-mono text-xs font-semibold text-foreground">
-                          {run.number ? `#${run.number}` : run.id}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-muted-foreground text-xs">
-                        {run.status === "passed" && (
-                          <Badge
-                            variant="outline"
-                            className="bg-emerald-50 text-emerald-700 border-emerald-300 gap-1.5 dark:bg-emerald-950/60 dark:text-emerald-300 dark:border-emerald-700 font-normal text-[11px]"
-                          >
-                            <CheckCircle2Icon className="size-3.5" />
-                            Passed
-                          </Badge>
-                        )}
-                        {run.status === "failed" && (
-                          <Badge
-                            variant="outline"
-                            className="bg-rose-50 text-rose-700 border-rose-300 gap-1.5 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-700 font-normal text-[11px]"
-                          >
-                            <XCircleIcon className="size-3.5" />
-                            Failed
-                          </Badge>
-                        )}
-                        {run.status === "running" && (
-                          <Badge
-                            variant="outline"
-                            className="bg-blue-50 text-blue-700 border-blue-300 gap-1.5 dark:bg-blue-950/60 dark:text-blue-300 dark:border-blue-700 font-normal text-[11px]"
-                          >
-                            <RefreshCwIcon className="size-3.5 animate-spin" />
-                            Running
-                          </Badge>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-muted-foreground text-xs">
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {run.platforms.map((plat) => (
-                            <PlatformBadge key={plat} platform={plat} />
-                          ))}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 font-mono text-xs text-muted-foreground">
-                        {run.tests.passed} / {run.tests.total}
-                      </td>
-                      <td className="px-6 py-4 text-muted-foreground text-xs">
-                        {run.duration}
-                      </td>
-                      <td className="px-6 py-4 text-muted-foreground text-xs">
-                        <Badge
-                          variant="secondary"
-                          className="font-normal text-[11px]"
-                        >
-                          {run.timestamp}
-                        </Badge>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </CardContent>
-      </Card>
 
-      {/* Shadcn Pagination Component Outside Below Table */}
+                    <td className="px-5 py-3.5">
+                      {(() => {
+                        const total = run.tests.total;
+                        const passed = run.tests.passed;
+                        const pct = total > 0 ? Math.round((passed / total) * 100) : 0;
+                        const isSuccess = total > 0 && passed === total;
+                        const isZero = total === 0 || passed === 0;
+
+                        return (
+                          <div className="flex flex-col gap-1 w-48 sm:w-56">
+                            <div className="flex items-center justify-between text-xs font-mono">
+                              <span className={cn(
+                                "font-semibold",
+                                isSuccess ? "text-emerald-600 dark:text-emerald-400" : isZero ? "text-muted-foreground" : "text-rose-600 dark:text-rose-400"
+                              )}>
+                                {passed} / {total}
+                              </span>
+                              <span className="text-[11px] text-muted-foreground font-sans font-medium">{pct}%</span>
+                            </div>
+                            <div className="w-full bg-zinc-100 dark:bg-zinc-800/80 h-1.5 rounded-none overflow-hidden">
+                              <div
+                                className={cn(
+                                  "h-full rounded-none transition-all duration-300",
+                                  isSuccess ? "bg-emerald-500" : isZero ? "bg-zinc-300 dark:bg-zinc-700" : "bg-rose-500"
+                                )}
+                                style={{ width: `${Math.max(pct > 0 ? 4 : 0, pct)}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </td>
+
+                    <td className="px-5 py-3.5 text-right font-mono text-xs text-muted-foreground">
+                      {run.timestamp}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Pagination Container */}
       {totalItems > 0 && (
         <Pagination className="px-1 py-1">
           <div className="text-xs text-muted-foreground">
@@ -391,7 +388,7 @@ function RunsTable() {
 
             <PaginationItem>
               <PaginationNext
-                onClick={() => updateParams(searchQuery, statusFilter, page + 1)}
+                onClick={() => updateParams(searchQuery, statusFilter, p => p + 1)}
                 disabled={page >= totalPages}
               />
             </PaginationItem>

@@ -172,14 +172,16 @@ serve(async (req: Request) => {
       eventType === "subscription.paused"
     ) {
       const updateData: Record<string, any> = {
-        subscription_status: "canceled",
-        expire_at: now,
         updated_at: now,
       };
 
-      // Only for subscription.canceled we keep their plan. For expired/paused, reset plan to 'free'
-      if (eventType !== "subscription.canceled") {
+      if (eventType === "subscription.canceled") {
+        updateData.subscription_status = "canceled";
+      } else {
+        // For expired / paused events, reset plan to 'free' while keeping subscription_status as 'active'
         updateData.plan = "free";
+        updateData.subscription_status = "active";
+        updateData.expire_at = now;
       }
 
       const { error: updateError } = await supabase
@@ -196,6 +198,7 @@ serve(async (req: Request) => {
         `[Creem Webhook] Updated user ${targetUser.email} (${targetUser.id}) for event '${eventType}'`
       );
     } else {
+
       console.log(`[Creem Webhook] Unhandled event type: ${eventType}`);
     }
 
