@@ -8,6 +8,10 @@ export interface AuthUser {
   email: string;
   name: string;
   api_key: string;
+  plan?: string;
+  subscription_status?: string;
+  subscribe_at?: string;
+  expire_at?: string;
 }
 
 const secretKey = process.env.CLERK_SECRET_KEY;
@@ -75,7 +79,7 @@ export async function authMiddleware(c: Context, next: Next) {
     if (apiKey) {
       const { data: user, error } = await supabase
         .from("users")
-        .select("id, email, name, api_key")
+        .select("id, email, name, api_key, plan, subscription_status, subscribe_at, expire_at")
         .eq("api_key", apiKey)
         .single();
 
@@ -120,7 +124,7 @@ export async function authMiddleware(c: Context, next: Next) {
           if (email) {
             const { data } = await supabase
               .from("users")
-              .select("id, email, name, api_key")
+              .select("id, email, name, api_key, plan, subscription_status, subscribe_at, expire_at")
               .eq("email", email)
               .maybeSingle();
             dbUser = data;
@@ -137,8 +141,9 @@ export async function authMiddleware(c: Context, next: Next) {
                 name,
                 api_key: newApiKey,
               })
-              .select("id, email, name, api_key")
+              .select("id, email, name, api_key, plan, subscription_status, subscribe_at, expire_at")
               .single();
+
 
             if (!insertErr && createdUser) {
               authenticatedUser = createdUser;

@@ -26,9 +26,10 @@ export const navGroups: SidebarNavGroup[] = [
       },
       {
         title: "Settings",
-        isModal: true,
+        path: "/settings",
         icon: <HugeiconsIcon icon={Settings01Icon} strokeWidth={2.2} />,
       },
+
     ],
   },
 ];
