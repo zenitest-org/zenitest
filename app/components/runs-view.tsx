@@ -51,8 +51,20 @@ interface RunItem {
 
 export function PlatformBadge({ platform }: { platform: string }) {
   const norm = platform.toLowerCase().trim();
-  const icon = norm === "web" ? <GlobeIcon className="size-3" /> : <SmartphoneIcon className="size-3" />;
-  const label = norm === "web" ? "Web" : norm === "ios" ? "iOS" : norm === "android" ? "Android" : platform;
+  const icon =
+    norm === "web" ? (
+      <GlobeIcon className="size-3" />
+    ) : (
+      <SmartphoneIcon className="size-3" />
+    );
+  const label =
+    norm === "web"
+      ? "Web"
+      : norm === "ios"
+        ? "iOS"
+        : norm === "android"
+          ? "Android"
+          : platform;
 
   return (
     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border border-zinc-200/60 dark:border-zinc-800 shrink-0">
@@ -111,12 +123,15 @@ function RunsTable() {
       params.set("limit", String(pageSize));
       params.set("offset", String(offset));
 
-      const response = await fetch(`${apiUrl}/api/executions/query?${params.toString()}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
+      const response = await fetch(
+        `${apiUrl}/api/executions/query?${params.toString()}`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            "Content-Type": "application/json",
+          },
         },
-      });
+      );
 
       if (!response.ok) {
         throw new Error("Failed to query executions");
@@ -126,7 +141,11 @@ function RunsTable() {
     enabled: isSignedIn,
   });
 
-  const updateParams = (newQ: string, newStatus: string, newPage: number = 1) => {
+  const updateParams = (
+    newQ: string,
+    newStatus: string,
+    newPage: number = 1,
+  ) => {
     const params = new URLSearchParams();
     if (newQ) params.set("q", newQ);
     if (newStatus && newStatus !== "all") params.set("status", newStatus);
@@ -145,10 +164,16 @@ function RunsTable() {
     id: item.id,
     number: item.number,
     suite: item.title || `Execution #${item.number || item.id.substring(0, 6)}`,
-    status: item.status === "completed" || item.status === "passed" ? "passed" : item.status === "failed" || item.status === "cancelled" ? "failed" : "running",
-    platforms: Array.isArray(item.platforms) && item.platforms.length > 0
-      ? item.platforms
-      : [item.environment || "web"],
+    status:
+      item.status === "completed" || item.status === "passed"
+        ? "passed"
+        : item.status === "failed" || item.status === "cancelled"
+          ? "failed"
+          : "running",
+    platforms:
+      Array.isArray(item.platforms) && item.platforms.length > 0
+        ? item.platforms
+        : [item.environment || "web"],
     tests: {
       passed: item.passed_test_cases || 0,
       total: item.total_test_cases || 0,
@@ -179,19 +204,19 @@ function RunsTable() {
       {/* Table Container Card */}
       <div className="rounded-xl border border-zinc-200/80 dark:border-zinc-800/80 bg-white dark:bg-zinc-950 shadow-xs overflow-hidden">
         {/* Controls Toolbar */}
-        <div className="p-3.5 sm:px-5 border-b border-zinc-200/80 dark:border-zinc-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-zinc-950">
-          <div className="relative flex-1 max-w-sm">
-            <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground" />
+        <div className="p-3 sm:px-2 border-b border-zinc-200/80 dark:border-zinc-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white dark:bg-zinc-950">
+          <div className="pl-3 relative flex-1 max-w-sm flex items-center gap-3">
+            <SearchIcon className=" text-muted-foreground size-3.5" />
             <input
               type="text"
               placeholder="Search test suite or run ID..."
               value={searchQuery}
               onChange={(e) => updateParams(e.target.value, statusFilter, 1)}
-              className="w-full pl-9 pr-3 py-1.5 text-xs text-foreground bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 rounded-lg focus:outline-none focus:ring-1 focus:ring-zinc-400 dark:focus:ring-zinc-600 transition-all placeholder:text-muted-foreground"
+              className="w-full  py-1.5 text-xs text-foreground bg-transparent dark:bg-transparent border-none rounded-lg focus:outline-none focus:ring-0 transition-all placeholder:text-muted-foreground"
             />
           </div>
 
-          <div className="flex items-center gap-1 bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800 p-0.5 rounded-lg shrink-0">
+          <div className="flex items-center gap-1 bg-transparent dark:bg-transparent border-none p-0.5 rounded-lg shrink-0">
             {statusOptions.map((opt) => (
               <button
                 key={opt.value}
@@ -201,7 +226,7 @@ function RunsTable() {
                   "px-2.5 py-1 text-xs font-medium rounded-md transition-colors cursor-pointer",
                   statusFilter === opt.value
                     ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-xs"
-                    : "text-muted-foreground hover:text-foreground hover:bg-zinc-100 dark:hover:bg-zinc-800/60"
+                    : "text-muted-foreground hover:text-foreground hover:bg-zinc-100 dark:hover:bg-zinc-800/60",
                 )}
               >
                 {opt.label}
@@ -225,7 +250,10 @@ function RunsTable() {
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/50">
               {isLoading ? (
                 <tr>
-                  <td colSpan={5} className="px-5 py-10 text-center text-muted-foreground">
+                  <td
+                    colSpan={5}
+                    className="px-5 py-10 text-center text-muted-foreground"
+                  >
                     <RefreshCwIcon className="size-4 animate-spin mx-auto mb-2 text-foreground" />
                     <span>Loading test runs...</span>
                   </td>
@@ -238,9 +266,12 @@ function RunsTable() {
                         <RocketIcon className="size-5" />
                       </div>
                       <div className="space-y-1">
-                        <h3 className="text-xs font-semibold text-foreground">No test executions found</h3>
+                        <h3 className="text-xs font-semibold text-foreground">
+                          No test executions found
+                        </h3>
                         <p className="text-xs text-muted-foreground leading-relaxed">
-                          Run tests using the CLI runner or check your search filters.
+                          Run tests using the CLI runner or check your search
+                          filters.
                         </p>
                       </div>
                       <div className="flex items-center gap-2 pt-1">
@@ -272,7 +303,7 @@ function RunsTable() {
                       "transition-colors",
                       run.status === "running"
                         ? "cursor-not-allowed opacity-80 select-none bg-sky-50/20 dark:bg-sky-950/10"
-                        : "hover:bg-zinc-50/80 dark:hover:bg-zinc-900/40 cursor-pointer"
+                        : "hover:bg-zinc-50/80 dark:hover:bg-zinc-900/40 cursor-pointer",
                     )}
                     onClick={() => {
                       if (run.status === "running") return;
@@ -318,28 +349,43 @@ function RunsTable() {
                       {(() => {
                         const total = run.tests.total;
                         const passed = run.tests.passed;
-                        const pct = total > 0 ? Math.round((passed / total) * 100) : 0;
+                        const pct =
+                          total > 0 ? Math.round((passed / total) * 100) : 0;
                         const isSuccess = total > 0 && passed === total;
                         const isZero = total === 0 || passed === 0;
 
                         return (
                           <div className="flex flex-col gap-1 w-48 sm:w-56">
                             <div className="flex items-center justify-between text-xs font-mono">
-                              <span className={cn(
-                                "font-semibold",
-                                isSuccess ? "text-emerald-600 dark:text-emerald-400" : isZero ? "text-muted-foreground" : "text-rose-600 dark:text-rose-400"
-                              )}>
+                              <span
+                                className={cn(
+                                  "font-semibold",
+                                  isSuccess
+                                    ? "text-emerald-600 dark:text-emerald-400"
+                                    : isZero
+                                      ? "text-muted-foreground"
+                                      : "text-rose-600 dark:text-rose-400",
+                                )}
+                              >
                                 {passed} / {total}
                               </span>
-                              <span className="text-[11px] text-muted-foreground font-sans font-medium">{pct}%</span>
+                              <span className="text-[11px] text-muted-foreground font-sans font-medium">
+                                {pct}%
+                              </span>
                             </div>
                             <div className="w-full bg-zinc-100 dark:bg-zinc-800/80 h-1.5 rounded-none overflow-hidden">
                               <div
                                 className={cn(
                                   "h-full rounded-none transition-all duration-300",
-                                  isSuccess ? "bg-emerald-500" : isZero ? "bg-zinc-300 dark:bg-zinc-700" : "bg-rose-500"
+                                  isSuccess
+                                    ? "bg-emerald-500"
+                                    : isZero
+                                      ? "bg-zinc-300 dark:bg-zinc-700"
+                                      : "bg-rose-500",
                                 )}
-                                style={{ width: `${Math.max(pct > 0 ? 4 : 0, pct)}%` }}
+                                style={{
+                                  width: `${Math.max(pct > 0 ? 4 : 0, pct)}%`,
+                                }}
                               />
                             </div>
                           </div>
@@ -362,15 +408,19 @@ function RunsTable() {
       {totalItems > 0 && (
         <Pagination className="px-1 py-1">
           <div className="text-xs text-muted-foreground">
-            Showing <span className="font-medium text-foreground">{startItem}</span>-
+            Showing{" "}
+            <span className="font-medium text-foreground">{startItem}</span>-
             <span className="font-medium text-foreground">{endItem}</span> of{" "}
-            <span className="font-medium text-foreground">{totalItems}</span> runs
+            <span className="font-medium text-foreground">{totalItems}</span>{" "}
+            runs
           </div>
 
           <PaginationContent>
             <PaginationItem>
               <PaginationPrevious
-                onClick={() => updateParams(searchQuery, statusFilter, page - 1)}
+                onClick={() =>
+                  updateParams(searchQuery, statusFilter, page - 1)
+                }
                 disabled={page <= 1}
               />
             </PaginationItem>
@@ -388,7 +438,9 @@ function RunsTable() {
 
             <PaginationItem>
               <PaginationNext
-                onClick={() => updateParams(searchQuery, statusFilter, p => p + 1)}
+                onClick={() =>
+                  updateParams(searchQuery, statusFilter, (p) => p + 1)
+                }
                 disabled={page >= totalPages}
               />
             </PaginationItem>
