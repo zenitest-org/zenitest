@@ -171,9 +171,11 @@ export interface TestCaseExecutionReport {
   logReports?: LogReportItem[];
   info?: ExecutionInfo;
   totalExecutionTimeMs: number;
+  stepExecutionTimeMs?: number;
   totalTokensUsed: number;
   error?: string;
 }
+
 
 /* ==================== Mobile Testing Extensions ==================== */
 

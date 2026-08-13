@@ -12,7 +12,11 @@ import {
   supabase,
   uploadScreenshot,
   attachSignedUrlsToDetails,
+  trackUserUsage,
+  checkUserLimitation,
 } from "../db/supabase";
+
+
 import { Executor } from "../executor";
 import { MobileExecutor, uploadAppBinaryToSupabase } from "../mobile-executor";
 import { TestCase, TestCaseExecutionReport } from "../types";
@@ -373,6 +377,46 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
       const testCasesArray: TestCase[] =
         rawTestCases || (testCase ? [testCase] : []);
 
+      // Check plan usage limitation
+      if (testCasesArray.length > 0) {
+        const limitCheck = await checkUserLimitation(user_id, bodyPlatform || "web");
+        if (!limitCheck.allowed) {
+          console.warn(`[Execution Refused 🚫] User ${user_id} exceeded limitation:`, limitCheck.reason);
+          return c.json(
+            {
+              success: false,
+              error: limitCheck.reason,
+              limitExceeded: true,
+              details: limitCheck,
+            },
+            403
+          );
+        }
+      } else if (Array.isArray(bodyPlatforms) && bodyPlatforms.length > 0) {
+        let anyAllowed = false;
+        let lastReason = "";
+        for (const p of bodyPlatforms) {
+          const check = await checkUserLimitation(user_id, String(p));
+          if (check.allowed) {
+            anyAllowed = true;
+            break;
+          } else {
+            lastReason = check.reason || "";
+          }
+        }
+        if (!anyAllowed) {
+          return c.json(
+            {
+              success: false,
+              error: lastReason || "All requested test platforms exceed plan limits.",
+              limitExceeded: true,
+            },
+            403
+          );
+        }
+      }
+
+
       if (testCasesArray.length > 0 && !clientId) {
         return c.json(
           { success: false, error: "Missing clientId for test execution" },
@@ -670,6 +714,9 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             })
             .eq("id", execution.id);
 
+          await trackUserUsage(user_id, "web", totalDurationMs);
+
+
           await stream.writeln(
             JSON.stringify({
               type: "execution_complete",
@@ -860,6 +907,9 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         .eq("id", execution.id)
         .select()
         .single();
+
+      await trackUserUsage(user_id, "web", totalDurationMs);
+
 
       const { data: finalDetails } = await supabase
         .from("execution_details")
@@ -1098,6 +1148,8 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
       }
 
       return c.json({ success: true, data: updatedExecution });
+
+
     } catch (err: any) {
       console.error("[Executions Route] Exception completing execution:", err);
       return c.json({ success: false, error: err.message || String(err) }, 500);
@@ -1120,6 +1172,22 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
       const normalizedPlatform = normalizePlatform(rawPlatform);
       const runnerPlatform: "mobile-ios" | "mobile-android" =
         normalizedPlatform === "android" ? "mobile-android" : "mobile-ios";
+
+      // Check plan usage limitation for mobile testing
+      const limitCheck = await checkUserLimitation(authUser.id, normalizedPlatform);
+      if (!limitCheck.allowed) {
+        console.warn(`[Mobile Execution Refused 🚫] User ${authUser.id} exceeded limitation:`, limitCheck.reason);
+        return c.json(
+          {
+            success: false,
+            error: limitCheck.reason,
+            limitExceeded: true,
+            details: limitCheck,
+          },
+          403
+        );
+      }
+
       const appFile = body.appFile as File | undefined;
       const appUrlFromReq = body.appUrl as string | undefined;
       const awsProjectArn =
@@ -1221,6 +1289,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           let passedCount = 0;
           let failedCount = 0;
           let totalDurationMs = 0;
+          let totalStepDurationMs = 0;
           let totalTokens = 0;
 
           for (let idx = 0; idx < testCases.length; idx++) {
@@ -1286,6 +1355,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             else failedCount++;
 
             totalDurationMs += durationMs;
+            totalStepDurationMs += report.stepExecutionTimeMs ?? durationMs;
             totalTokens += report.totalTokensUsed || 0;
 
             const processedStepReports: any[] = [];
@@ -1382,6 +1452,10 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
               .eq("id", executionRecord.id);
           }
 
+          // Track mobile usage excluding device initialization duration
+          await trackUserUsage(authUser.id, normalizedPlatform, totalStepDurationMs);
+
+
           await stream.writeln(
             JSON.stringify({
               type: "execution_complete",
@@ -1399,6 +1473,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
       let passedCount = 0;
       let failedCount = 0;
       let totalDurationMs = 0;
+      let totalStepDurationMs = 0;
       let totalTokens = 0;
 
       for (let idx = 0; idx < testCases.length; idx++) {
@@ -1441,6 +1516,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         else failedCount++;
 
         totalDurationMs += durationMs;
+        totalStepDurationMs += report.stepExecutionTimeMs ?? durationMs;
         totalTokens += report.totalTokensUsed || 0;
 
         // 3. Upload Step Screenshots to Supabase Storage & Sanitize
@@ -1543,6 +1619,10 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           `[Mobile DB] Completed execution record ${executionRecord.id} with status: ${finalStatus}`,
         );
       }
+
+      // Track mobile usage excluding device initialization duration
+      await trackUserUsage(authUser.id, normalizedPlatform, totalStepDurationMs);
+
 
       return c.json({
         success: true,

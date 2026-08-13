@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useAuth, useUser } from "@clerk/nextjs";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { CopyIcon, CheckIcon, EyeIcon, EyeOffIcon, ArrowRightIcon, RefreshCwIcon, Loader2Icon } from "lucide-react";
+import { CopyIcon, CheckIcon, EyeIcon, EyeOffIcon, ArrowRightIcon, RefreshCwIcon, Loader2Icon, GlobeIcon, SmartphoneIcon } from "lucide-react";
+
 import { cn } from "@/lib/utils";
 import {
   Dialog,
@@ -26,12 +27,15 @@ interface UserProfileResponse {
     subscription_status: string;
     subscribe_at: string | null;
     expire_at: string | null;
+    minutes_used_web?: number;
+    minutes_used_mobile?: number;
     used_web_minutes?: number;
     max_web_minutes?: number;
     used_mobile_minutes?: number;
     max_mobile_minutes?: number;
   };
 }
+
 
 function formatDate(dateStr: string | null | undefined): string | null {
   if (!dateStr) return null;
@@ -85,9 +89,14 @@ export function SettingsView() {
   const apiKey = userData?.api_key || "";
   const displayKey = showApiKey ? apiKey : (apiKey ? `${apiKey.substring(0, 18)}...` : "zt-••••••••••••••••••••••••••••••••");
 
-  const usedWebMins = userData?.used_web_minutes || 0;
+  const usedWebMins = userData?.used_web_minutes ?? userData?.minutes_used_web ?? 0;
   const maxWebMins = userData?.max_web_minutes ?? (currentPlan === "pro" ? -1 : 100);
   const webPct = maxWebMins > 0 ? Math.min(100, Math.round((usedWebMins / maxWebMins) * 100)) : 0;
+
+  const usedMobileMins = userData?.used_mobile_minutes ?? userData?.minutes_used_mobile ?? 0;
+  const maxMobileMins = userData?.max_mobile_minutes ?? (currentPlan === "pro" ? 100 : 0);
+  const mobilePct = maxMobileMins > 0 ? Math.min(100, Math.round((usedMobileMins / maxMobileMins) * 100)) : 0;
+
 
   const handleCopyKey = () => {
     if (!apiKey) return;
@@ -175,29 +184,107 @@ export function SettingsView() {
             </div>
           </div>
 
-          {/* Usage Progress Bar */}
-          <div className="border-t border-zinc-200/80 dark:border-zinc-800/80 pt-3 space-y-2">
-            <div className="flex items-center justify-between text-xs">
-              <span className="font-medium text-foreground">Execution Usage</span>
-              <span className="text-muted-foreground font-mono text-[11px]">
-                {maxWebMins < 0 ? (
-                  <span>{usedWebMins} mins used / <strong>Unlimited</strong></span>
-                ) : (
-                  <span>{usedWebMins} / {maxWebMins} mins ({webPct}%)</span>
-                )}
-              </span>
-            </div>
+          {/* Usage Metrics Section: Web Testing & Mobile Testing */}
+          <div className="border-t border-zinc-200/80 dark:border-zinc-800/80 pt-4 space-y-3">
+            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider block">
+              Monthly Testing Quota
+            </span>
 
-            <div className="w-full bg-zinc-200/80 dark:bg-zinc-800 rounded-full h-2 overflow-hidden">
-              <div
-                className={cn(
-                  "h-full rounded-full transition-all duration-300",
-                  webPct >= 90 ? "bg-amber-500" : "bg-zinc-900 dark:bg-zinc-100"
-                )}
-                style={{ width: maxWebMins < 0 ? "100%" : `${Math.max(4, webPct)}%` }}
-              />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+              {/* Web Testing Usage Card */}
+              <div className="rounded-lg border border-zinc-200/80 dark:border-zinc-800/80 bg-white dark:bg-zinc-950 p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="size-7 rounded-md bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center text-cyan-600 dark:text-cyan-400 shrink-0">
+                      <GlobeIcon className="size-3.5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-foreground truncate">Web Testing</p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-mono font-medium text-foreground shrink-0">
+                    {maxWebMins < 0 ? (
+                      <span className="text-cyan-600 dark:text-cyan-400 font-semibold">{usedWebMins}m / Unlimited</span>
+                    ) : (
+                      <span>{usedWebMins} / {maxWebMins}m</span>
+                    )}
+                  </span>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="w-full bg-zinc-100 dark:bg-zinc-800/80 rounded-full h-2 overflow-hidden relative">
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-all duration-500",
+                        maxWebMins < 0
+                          ? "bg-cyan-500"
+                          : webPct >= 90
+                          ? "bg-rose-500"
+                          : "bg-cyan-500"
+                      )}
+                      style={{ width: maxWebMins < 0 ? "100%" : `${Math.max(4, webPct)}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between items-center text-[10px] text-muted-foreground font-mono">
+                    <span>{maxWebMins < 0 ? "Pro Plan (Unlimited)" : `${webPct}% used`}</span>
+                    <span>{maxWebMins < 0 ? "Active" : `${Math.max(0, maxWebMins - usedWebMins)}m remaining`}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Mobile Testing Usage Card */}
+              <div className="rounded-lg border border-zinc-200/80 dark:border-zinc-800/80 bg-white dark:bg-zinc-950 p-3.5 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div className="size-7 rounded-md bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-purple-600 dark:text-purple-400 shrink-0">
+                      <SmartphoneIcon className="size-3.5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold text-foreground truncate">Mobile Testing</p>
+                    </div>
+                  </div>
+
+                  <span className="text-xs font-mono font-medium text-foreground shrink-0">
+                    {maxMobileMins === 0 ? (
+                      <span className="text-muted-foreground font-normal text-[11px]">0 / 0m</span>
+                    ) : (
+                      <span>{usedMobileMins} / {maxMobileMins}m</span>
+                    )}
+                  </span>
+                </div>
+
+                <div className="space-y-1">
+                  <div className="w-full bg-zinc-100 dark:bg-zinc-800/80 rounded-full h-2 overflow-hidden">
+                    <div
+                      className={cn(
+                        "h-full rounded-full transition-all duration-500",
+                        maxMobileMins === 0
+                          ? "bg-zinc-300 dark:bg-zinc-700 opacity-40"
+                          : mobilePct >= 90
+                          ? "bg-rose-500"
+                          : "bg-purple-500"
+                      )}
+                      style={{ width: maxMobileMins === 0 ? "0%" : `${Math.max(4, mobilePct)}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between items-center text-[10px] text-muted-foreground font-mono">
+                    {maxMobileMins === 0 ? (
+                      <>
+                        <span className="text-amber-600 dark:text-amber-400 font-medium font-sans">Not in Free plan</span>
+                        <Link href="/checkout" className="text-cyan-600 dark:text-cyan-400 hover:underline font-sans">Upgrade</Link>
+                      </>
+                    ) : (
+                      <>
+                        <span>{mobilePct}% used</span>
+                        <span>{Math.max(0, maxMobileMins - usedMobileMins)}m remaining</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
+
         </div>
 
         {/* API Key Box */}

@@ -11,28 +11,23 @@ export function createAuthRouter() {
   const handleVerify = async (c: any) => {
     const user = c.get("user") as AuthUser;
 
-    let usedWebMinutes = 0;
-    let usedMobileMinutes = 0;
+    let usedWebMinutes = user.minutes_used_web ?? 0;
+    let usedMobileMinutes = user.minutes_used_mobile ?? 0;
 
+    // If stored minutes are not populated yet, check public.users table or calculate fallback
     try {
-      const { data: userExecutions } = await supabase
-        .from("executions")
-        .select("duration, duration_ms, platform")
-        .eq("user_id", user.id);
+      const { data: dbUser } = await supabase
+        .from("users")
+        .select("minutes_used_web, minutes_used_mobile")
+        .eq("id", user.id)
+        .maybeSingle();
 
-      if (userExecutions && Array.isArray(userExecutions)) {
-        for (const exec of userExecutions) {
-          const durationSeconds = Number(exec.duration || (exec.duration_ms ? exec.duration_ms / 1000 : 0)) || 0;
-          const mins = durationSeconds / 60;
-          if (exec.platform === "mobile" || exec.platform === "ios" || exec.platform === "android") {
-            usedMobileMinutes += mins;
-          } else {
-            usedWebMinutes += mins;
-          }
-        }
+      if (dbUser) {
+        usedWebMinutes = dbUser.minutes_used_web ?? usedWebMinutes;
+        usedMobileMinutes = dbUser.minutes_used_mobile ?? usedMobileMinutes;
       }
     } catch (err) {
-      console.warn("[Auth Verify] Failed to calculate execution usage minutes:", err);
+      console.warn("[Auth Verify] Failed to fetch stored user usage minutes:", err);
     }
 
     const plan = (user.plan || "free").toLowerCase();
@@ -51,13 +46,16 @@ export function createAuthRouter() {
         subscription_status: user.subscription_status || "active",
         subscribe_at: user.subscribe_at || null,
         expire_at: user.expire_at || null,
-        used_web_minutes: Math.ceil(usedWebMinutes),
+        minutes_used_web: usedWebMinutes,
+        minutes_used_mobile: usedMobileMinutes,
+        used_web_minutes: usedWebMinutes,
         max_web_minutes: maxWebMinutes,
-        used_mobile_minutes: Math.ceil(usedMobileMinutes),
+        used_mobile_minutes: usedMobileMinutes,
         max_mobile_minutes: maxMobileMinutes,
       },
     });
   };
+
 
 
   router.get("/verify", handleVerify);

@@ -12,6 +12,9 @@ export interface AuthUser {
   subscription_status?: string;
   subscribe_at?: string;
   expire_at?: string;
+  minutes_used_web?: number;
+  minutes_used_mobile?: number;
+  geminiApiKey?: string;
 }
 
 const secretKey = process.env.CLERK_SECRET_KEY;
@@ -79,7 +82,7 @@ export async function authMiddleware(c: Context, next: Next) {
     if (apiKey) {
       const { data: user, error } = await supabase
         .from("users")
-        .select("id, email, name, api_key, plan, subscription_status, subscribe_at, expire_at")
+        .select("id, email, name, api_key, plan, subscription_status, subscribe_at, expire_at, minutes_used_web, minutes_used_mobile")
         .eq("api_key", apiKey)
         .single();
 
@@ -124,7 +127,7 @@ export async function authMiddleware(c: Context, next: Next) {
           if (email) {
             const { data } = await supabase
               .from("users")
-              .select("id, email, name, api_key, plan, subscription_status, subscribe_at, expire_at")
+              .select("id, email, name, api_key, plan, subscription_status, subscribe_at, expire_at, minutes_used_web, minutes_used_mobile")
               .eq("email", email)
               .maybeSingle();
             dbUser = data;
@@ -141,8 +144,9 @@ export async function authMiddleware(c: Context, next: Next) {
                 name,
                 api_key: newApiKey,
               })
-              .select("id, email, name, api_key, plan, subscription_status, subscribe_at, expire_at")
+              .select("id, email, name, api_key, plan, subscription_status, subscribe_at, expire_at, minutes_used_web, minutes_used_mobile")
               .single();
+
 
 
             if (!insertErr && createdUser) {

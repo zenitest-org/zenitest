@@ -348,12 +348,15 @@ async function runTestCase(testCase: any, apiKey: string) {
   });
 
   if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Server returned error status ${response.status}: ${errText}`);
+    const errData = await response.json().catch(() => ({}));
+    const errMsg = errData.error || errData.message || `Server error (${response.status})`;
+    console.error(`\x1b[1;31mError: ${errMsg}\x1b[0m`);
+    process.exit(1);
   }
 
   return await response.json();
 }
+
 
 interface LiveTestCaseState {
   id: string;
@@ -374,6 +377,7 @@ interface LiveTestCaseState {
 class LiveReportRenderer {
   private executionId: string = "";
   private rows: Map<string, LiveTestCaseState> = new Map();
+  private errorMessages: string[] = [];
   private lastLineCount: number = 0;
 
   constructor(testCases: { id: string; title: string; platform?: string; fileName?: string }[]) {
@@ -410,8 +414,32 @@ class LiveReportRenderer {
 
   public setExecutionId(id: string) {
     this.executionId = id;
+  }
+
+  public removeTestCases(ids: string[]) {
+    for (const id of ids) {
+      this.rows.delete(id);
+    }
     this.render();
   }
+
+  public addErrorMessage(msg: string) {
+    if (!this.errorMessages.includes(msg)) {
+      this.errorMessages.push(msg);
+    }
+    this.render();
+  }
+
+  public getExecutedCount(): number {
+    return Array.from(this.rows.values()).filter(
+      (r) => r.rawStatus === "PASSED" || r.rawStatus === "FAILED"
+    ).length;
+  }
+
+  public getFailedCount(): number {
+    return Array.from(this.rows.values()).filter((r) => r.rawStatus === "FAILED").length;
+  }
+
 
   public updateStep(testCaseId: string, stepIndex: number, totalSteps: number, stepType: string, description: string) {
     const row = this.rows.get(testCaseId);
@@ -450,11 +478,10 @@ class LiveReportRenderer {
     }
 
     const cols = process.stdout.columns || 80;
-    const termWidth = Math.max(60, Math.min(cols, 100));
+    const termWidth = Math.max(30, Math.min(cols - 2, 80));
     const separator = "\x1b[90m" + "─".repeat(termWidth) + "\x1b[0m";
 
     const lines: string[] = [];
-
     const rowList = Array.from(this.rows.values());
 
     const groups: { [key: string]: LiveTestCaseState[] } = {};
@@ -464,12 +491,14 @@ class LiveReportRenderer {
       groups[g].push(r);
     }
 
-    let maxIdLen = 20;
+    let maxIdLen = 16;
     for (const r of rowList) {
       if (r.displayId.length > maxIdLen) maxIdLen = r.displayId.length;
     }
+    maxIdLen = Math.min(maxIdLen, Math.max(12, cols - 40));
 
     for (const groupHeader of Object.keys(groups)) {
+      if (!groups[groupHeader] || groups[groupHeader].length === 0) continue;
       lines.push(`\x1b[1;37m${groupHeader}\x1b[0m`);
       for (const r of groups[groupHeader]) {
         let icon = "\x1b[90m·\x1b[0m";
@@ -484,23 +513,36 @@ class LiveReportRenderer {
           }
         } else if (r.rawStatus === "FAILED") {
           icon = "\x1b[1;31m×\x1b[0m";
-          const stepInfo = r.stepIndex > 0 && r.totalSteps > 0 ? ` at step ${r.stepIndex}/${r.totalSteps}` : "";
-          const actionText = this.formatStepName(r.stepType, r.stepDescription || r.error || "");
-          const detail = actionText ? `: ${actionText}` : "";
-          statusStr = `\x1b[1;31mfailed${stepInfo}${detail}\x1b[0m`;
+          if (r.stepIndex === 0 && r.error) {
+            statusStr = `\x1b[1;31merror: ${r.error}\x1b[0m`;
+          } else {
+            const stepInfo = r.stepIndex > 0 && r.totalSteps > 0 ? ` at step ${r.stepIndex}/${r.totalSteps}` : "";
+            const actionText = r.error || this.formatStepName(r.stepType, r.stepDescription || "", cols - maxIdLen - 25);
+            const detail = actionText ? `: ${actionText}` : "";
+            statusStr = `\x1b[1;31mfailed${stepInfo}${detail}\x1b[0m`;
+          }
         } else if (r.rawStatus === "RUNNING") {
           icon = "\x1b[1;33m⠋\x1b[0m";
           const stepInfo = r.stepIndex > 0 && r.totalSteps > 0 ? ` (${r.stepIndex}/${r.totalSteps})` : "";
-          const actionText = this.formatStepName(r.stepType, r.stepDescription);
+          const actionText = this.formatStepName(r.stepType, r.stepDescription, cols - maxIdLen - 25);
           const detail = actionText ? `: ${actionText}` : "";
           statusStr = `\x1b[1;33mrunning${stepInfo}${detail}\x1b[0m`;
         }
 
-        const paddedId = r.displayId.padEnd(maxIdLen + 4, " ");
+        const truncatedId = r.displayId.length > maxIdLen ? r.displayId.slice(0, maxIdLen - 3) + "..." : r.displayId;
+        const paddedId = truncatedId.padEnd(maxIdLen + 4, " ");
         lines.push(`  ${icon} ${paddedId}${statusStr}`);
       }
       lines.push("");
     }
+
+    if (this.errorMessages.length > 0) {
+      for (const errMsg of this.errorMessages) {
+        lines.push(`\x1b[1;31mError: ${errMsg}\x1b[0m`);
+      }
+      lines.push("");
+    }
+
 
     lines.push(separator);
 
@@ -519,18 +561,28 @@ class LiveReportRenderer {
 
     lines.push(parts.join(" \x1b[90m·\x1b[0m "));
 
+    let physicalLineCount = 0;
+    for (const l of lines) {
+      const plain = l.replace(/\x1b\[[0-9;]*m/g, "");
+      physicalLineCount += Math.max(1, Math.ceil((plain.length || 1) / cols));
+    }
+
     const output = lines.join("\n");
     process.stdout.write(output + "\n");
-    this.lastLineCount = (output.match(/\n/g) || []).length + 1;
+    this.lastLineCount = physicalLineCount;
+
   }
 
-  private formatStepName(stepType: string, description: string): string {
+  private formatStepName(stepType: string, description: string, maxLen: number = 35): string {
+    const limit = Math.max(15, maxLen);
     if (!description) return stepType || "";
+    let text = description;
     if (stepType.toLowerCase() === "navigate" && !description.toLowerCase().startsWith("navigate")) {
-      return `Navigate ${description}`;
+      text = `Navigate ${description}`;
     }
-    return description.length > 45 ? description.slice(0, 42) + "..." : description;
+    return text.length > limit ? text.slice(0, limit - 3) + "..." : text;
   }
+
 }
 
 function loadTestCasesFromDir(targetDir: string): any[] {
@@ -791,11 +843,9 @@ async function runTests(options: Record<string, any>) {
         total_test_cases: totalCount,
       }),
     });
-    if (initRes.ok) {
-      const initData = await initRes.json();
-      if (initData.success && initData.data?.id) {
-        executionId = initData.data.id;
-      }
+    const initData = await initRes.json().catch(() => ({}));
+    if (initRes.ok && initData.success && initData.data?.id) {
+      executionId = initData.data.id;
     }
   } catch (_) {}
 
@@ -805,10 +855,12 @@ async function runTests(options: Record<string, any>) {
   }
   renderer.render();
 
+
   let exitCode = 0;
 
-  // 1. Run Web Tests
-  if (allWebTestCases.length > 0) {
+  // 1. Web Tests Task
+  const runWeb = async () => {
+    if (allWebTestCases.length === 0) return;
     const clientId = await fetchServerClientId(apiKey);
     const secrets = loadLocalSecrets(dirPath);
     const client = new ZeniProxyClient({
@@ -833,7 +885,15 @@ async function runTests(options: Record<string, any>) {
         body: JSON.stringify({ executionId, clientId, testCases: allWebTestCases, parallel, platform: "web", platforms: ["web"] }),
       });
 
-      if (response.ok && response.body) {
+      if (!response.ok) {
+        client.stop();
+        const errData = await response.json().catch(() => ({}));
+        const errMsg = errData.error || errData.message || `Web execution failed with status ${response.status}`;
+        for (const tc of allWebTestCases) {
+          renderer.completeTest(tc.id, "FAILED", 0, errMsg);
+        }
+      } else if (response.body) {
+
         const reader = (response.body as ReadableStream<Uint8Array>).getReader();
         const decoder = new TextDecoder();
         let buffer = "";
@@ -865,14 +925,20 @@ async function runTests(options: Record<string, any>) {
     } finally {
       client.stop();
     }
-  }
+  };
 
-  // 2. Run Mobile iOS Tests
-  if (iosTestCases.length > 0) {
-    const iosAppPath = options.bundle || options.b || options["app-ios"] || resolve(process.cwd(), "sample-apps/flutter_sample_app/build/ios/ipa/Runner.ipa");
-    if (!existsSync(iosAppPath)) {
-      console.warn(`[Warning] iOS binary not found at ${iosAppPath}. Build Runner.ipa first.`);
-    } else {
+  // 2. Mobile iOS Tests Task
+  const runIos = async () => {
+
+    if (iosTestCases.length === 0) return;
+    try {
+      const iosAppPath = options.bundle || options.b || options["app-ios"] || resolve(process.cwd(), "sample-apps/flutter_sample_app/build/ios/ipa/Runner.ipa");
+      if (!existsSync(iosAppPath)) {
+        for (const tc of iosTestCases) {
+          renderer.completeTest(tc.id, "FAILED", 0, `iOS binary not found at ${iosAppPath}`);
+        }
+        return;
+      }
       const secrets = loadLocalSecrets(dirPath);
       const formData = new FormData();
       const fileData = readFileSync(iosAppPath);
@@ -894,7 +960,13 @@ async function runTests(options: Record<string, any>) {
         body: formData,
       });
 
-      if (res.ok && res.body) {
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        const errMsg = errData.error || errData.message || `Mobile iOS execution failed with status ${res.status}`;
+        for (const tc of iosTestCases) {
+          renderer.completeTest(tc.id, "FAILED", 0, errMsg);
+        }
+      } else if (res.body) {
         const reader = (res.body as ReadableStream<Uint8Array>).getReader();
         const decoder = new TextDecoder();
         let buffer = "";
@@ -922,19 +994,26 @@ async function runTests(options: Record<string, any>) {
             } catch {}
           }
         }
-      } else {
-        const data: any = await res.json().catch(() => ({}));
-        if (!data.success) exitCode = 1;
+      }
+    } catch (err: any) {
+      const errMsg = err.message || "Failed to execute iOS tests";
+      for (const tc of iosTestCases) {
+        renderer.completeTest(tc.id, "FAILED", 0, errMsg);
       }
     }
-  }
+  };
 
-  // 3. Run Mobile Android Tests
-  if (androidTestCases.length > 0) {
-    const androidAppPath = options.bundle || options.b || options["app-android"] || resolve(process.cwd(), "sample-apps/flutter_sample_app/build/app/outputs/flutter-apk/app-debug.apk");
-    if (!existsSync(androidAppPath)) {
-      console.warn(`[Warning] Android binary not found at ${androidAppPath}. Build app-debug.apk first.`);
-    } else {
+  // 3. Mobile Android Tests Task
+  const runAndroid = async () => {
+    if (androidTestCases.length === 0) return;
+    try {
+      const androidAppPath = options.bundle || options.b || options["app-android"] || resolve(process.cwd(), "sample-apps/flutter_sample_app/build/app/outputs/flutter-apk/app-debug.apk");
+      if (!existsSync(androidAppPath)) {
+        for (const tc of androidTestCases) {
+          renderer.completeTest(tc.id, "FAILED", 0, `Android binary not found at ${androidAppPath}`);
+        }
+        return;
+      }
       const secrets = loadLocalSecrets(dirPath);
       const formData = new FormData();
       const fileData = readFileSync(androidAppPath);
@@ -956,7 +1035,13 @@ async function runTests(options: Record<string, any>) {
         body: formData,
       });
 
-      if (res.ok && res.body) {
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        const errMsg = errData.error || errData.message || `Mobile Android execution failed with status ${res.status}`;
+        for (const tc of androidTestCases) {
+          renderer.completeTest(tc.id, "FAILED", 0, errMsg);
+        }
+      } else if (res.body) {
         const reader = (res.body as ReadableStream<Uint8Array>).getReader();
         const decoder = new TextDecoder();
         let buffer = "";
@@ -984,14 +1069,23 @@ async function runTests(options: Record<string, any>) {
             } catch {}
           }
         }
-      } else {
-        const data: any = await res.json().catch(() => ({}));
-        if (!data.success) exitCode = 1;
+      }
+    } catch (err: any) {
+      const errMsg = err.message || "Failed to execute Android tests";
+      for (const tc of androidTestCases) {
+        renderer.completeTest(tc.id, "FAILED", 0, errMsg);
       }
     }
-  }
+  };
+
+
+  // Run all platform test tasks concurrently in parallel
+
+  await Promise.all([runWeb(), runIos(), runAndroid()]);
+
 
   if (executionId) {
+
     try {
       await fetch(`${API_BASE_URL}/api/executions/complete`, {
         method: "POST",
@@ -1013,9 +1107,16 @@ async function runTests(options: Record<string, any>) {
     console.log();
   }
 
+  const executedCount = renderer.getExecutedCount();
+  const failedCount = renderer.getFailedCount();
+  if (executedCount === 0 || failedCount > 0) {
+    exitCode = 1;
+  }
+
   if (exitCode !== 0) {
     process.exit(exitCode);
   }
+
 }
 
 async function runReport(options: Record<string, any>) {

@@ -437,7 +437,8 @@ export class MobileExecutor {
 
       let overallSuccess = true;
 
-      // 3. Execute Steps
+      // 3. Execute Steps (track actual step execution time excluding device initialization)
+      const stepExecutionStartTime = Date.now();
       for (const step of testCase.steps) {
         const stepStartTime = Date.now();
         let stepSuccess = false;
@@ -571,8 +572,10 @@ export class MobileExecutor {
         if (!stepSuccess) break;
       }
 
+      const stepExecutionTimeMs = Date.now() - stepExecutionStartTime;
+
       console.log(
-        `\n[MobileExecutor] Overall Result for "${testCase.title}": ${overallSuccess ? "PASSED ✅" : "FAILED ❌"}`,
+        `\n[MobileExecutor] Overall Result for "${testCase.title}": ${overallSuccess ? "PASSED ✅" : "FAILED ❌"} (Steps duration: ${stepExecutionTimeMs}ms, Total with init: ${Date.now() - startTime}ms)`,
       );
 
       return {
@@ -584,8 +587,10 @@ export class MobileExecutor {
         networkReports,
         logReports,
         totalExecutionTimeMs: Date.now() - startTime,
+        stepExecutionTimeMs,
         totalTokensUsed,
       };
+
     } finally {
       console.log(
         `\n=====================================================================================`,
