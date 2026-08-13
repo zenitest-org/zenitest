@@ -213,7 +213,7 @@ function RunsTable() {
         {/* Table Body */}
         <div className="relative w-full overflow-x-auto">
           <table className="w-full text-xs text-left">
-            <thead className="bg-white dark:bg-zinc-950 text-[11px] font-medium tracking-wider uppercase text-muted-foreground border-b border-zinc-200/80 dark:border-zinc-800/80">
+            <thead className="bg-zinc-50 dark:bg-zinc-900/60 text-[11px] font-medium tracking-wider uppercase text-muted-foreground border-b border-zinc-200/80 dark:border-zinc-800/80">
               <tr>
                 <th className="px-5 py-3 font-semibold">Run ID</th>
                 <th className="px-5 py-3 font-semibold">Status</th>
