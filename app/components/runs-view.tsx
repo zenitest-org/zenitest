@@ -439,7 +439,7 @@ function RunsTable() {
             <PaginationItem>
               <PaginationNext
                 onClick={() =>
-                  updateParams(searchQuery, statusFilter, (p) => p + 1)
+                  updateParams(searchQuery, statusFilter, page + 1)
                 }
                 disabled={page >= totalPages}
               />
