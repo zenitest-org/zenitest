@@ -60,19 +60,21 @@
       },
     },
     "cli": {
-      "name": "cli",
-      "version": "1.0.0",
+      "name": "zenitest-cli",
+      "version": "1.0.3",
       "bin": {
-        "zenitest": "./src/cli.ts",
+        "zenitest": "./dist/cli.js",
       },
       "dependencies": {
-        "@types/js-yaml": "^4.0.9",
-        "@types/ws": "^8.18.1",
         "dotenv": "^17.4.2",
         "js-yaml": "^5.2.2",
-        "tsx": "^4.16.2",
         "ws": "^8.21.1",
         "yaml": "^2.9.0",
+      },
+      "devDependencies": {
+        "@types/js-yaml": "^4.0.9",
+        "@types/ws": "^8.18.1",
+        "tsx": "^4.16.2",
       },
     },
     "documentation": {
@@ -1016,8 +1018,6 @@
     "ci-info": ["ci-info@4.4.0", "", {}, "sha512-77PSwercCZU2Fc4sX94eF8k8Pxte6JAwL4/ICZLFjJLqegs7kCuAsqqj/70NQF6TvDpgFjkubQB2FW2ZZddvQg=="],
 
     "class-variance-authority": ["class-variance-authority@0.7.1", "", { "dependencies": { "clsx": "^2.1.1" } }, "sha512-Ka+9Trutv7G8M6WT6SeiRWz792K5qEqIGEGzXKhAE6xOWAY6pPH8U+9IY3oCMv6kqTmLsv7Xh/2w2RigkePMsg=="],
-
-    "cli": ["cli@workspace:cli"],
 
     "cli-cursor": ["cli-cursor@5.0.0", "", { "dependencies": { "restore-cursor": "^5.0.0" } }, "sha512-aCj4O5wKyszjMmDT4tZj93kxyydN/K5zPWSCe6/0AV/AA1pqe5ZBIw0a2ZfPQV7lL5/yb5HsUreJ6UFAF1tEQw=="],
 
@@ -2654,6 +2654,8 @@
     "yocto-spinner": ["yocto-spinner@1.2.2", "", { "dependencies": { "yoctocolors": "^2.1.1" } }, "sha512-DODGl1wJjA/s5pnJFKau9lIYHT81lnhob1i3e1TjxZRxEhWRKl74nTbWE6H5KlkViQQTo/Z29YFdxzTZAMY3ng=="],
 
     "yoctocolors": ["yoctocolors@2.2.0", "", {}, "sha512-xYqdZFUK/VYazNl/oCDYN+3WloWQwMfZxBoiNt6qNyk+xfOdi598muWE42rNZFp1kNOiqW936q5RhUdnpqElSg=="],
+
+    "zenitest-cli": ["zenitest-cli@workspace:cli"],
 
     "zip-stream": ["zip-stream@6.0.1", "", { "dependencies": { "archiver-utils": "^5.0.0", "compress-commons": "^6.0.2", "readable-stream": "^4.0.0" } }, "sha512-zK7YHHz4ZXpW89AHXUPbQVGKI7uvkd3hzusTdotCg1UxyaVtg0zFJSTfW/Dq5f7OBBVnq6cZIaC8Ti4hb6dtCA=="],
 
