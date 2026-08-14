@@ -2,6 +2,7 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import lucode from "lucode-starlight";
+import node from "@astrojs/node";
 
 // https://astro.build/config
 export default defineConfig({
@@ -71,5 +72,12 @@ export default defineConfig({
     server: {
       allowedHosts: ["docs.zenitest.ai"],
     },
+  },
+  output: "server",
+  adapter: node({
+    mode: "standalone",
+  }),
+  server: {
+    host: "0.0.0.0",
   },
 });
