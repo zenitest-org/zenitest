@@ -611,7 +611,11 @@ export class Executor {
     }
 
     this.ai = new GoogleGenAI({ apiKey });
-    this.model = process.env.ZENI_MODEL || "gemini-2.5-flash-lite";
+    this.model =
+      process.env.GEMINI_MODEL ||
+      process.env.ZENI_MODEL ||
+      process.env.STAGEHAND_MODEL ||
+      "gemini-3.5-flash-lite";
     this.cache = new ExecutorCache();
     this.sendScreenshot =
       options?.sendScreenshot ??

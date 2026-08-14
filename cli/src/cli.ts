@@ -1,5 +1,6 @@
-#!/usr/bin/env bun
+#!/usr/bin/env node
 
+import pkg from "../package.json";
 import { ZeniProxyClient } from "./proxyClient";
 import { readdirSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, existsSync, statSync } from "fs";
 import { join, resolve, basename } from "path";
@@ -7,6 +8,53 @@ import { homedir } from "os";
 import { createInterface } from "readline/promises";
 import { stdin as input, stdout as output } from "process";
 import { parse as parseYaml } from "yaml";
+
+const CURRENT_VERSION = pkg.version;
+
+function parseSemver(v: string): [number, number, number] {
+  const clean = v.replace(/^v/, "").trim();
+  const parts = clean.split("-")[0].split(".").map((n) => parseInt(n, 10) || 0);
+  return [parts[0] || 0, parts[1] || 0, parts[2] || 0];
+}
+
+function isOutdated(current: string, latest: string): boolean {
+  const c = parseSemver(current);
+  const l = parseSemver(latest);
+  for (let i = 0; i < 3; i++) {
+    if (l[i] > c[i]) return true;
+    if (l[i] < c[i]) return false;
+  }
+  return false;
+}
+
+async function checkForLatestVersion(): Promise<void> {
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+
+    const res = await fetch("https://registry.npmjs.org/zenitest-cli/latest", {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (res.ok) {
+      const data = (await res.json()) as { version?: string };
+      const latestVersion = data.version;
+      if (latestVersion && isOutdated(CURRENT_VERSION, latestVersion)) {
+        console.error(`\n\x1b[1;31m[ERROR] You are using an outdated version of zenitest-cli (v${CURRENT_VERSION}).\x1b[0m`);
+        console.error(`\x1b[1;32mThe latest version is v${latestVersion}.\x1b[0m\n`);
+        console.error(`\x1b[1mPlease upgrade to the latest version before continuing:\x1b[0m`);
+        console.error(`  \x1b[36mnpm install -g zenitest-cli@latest\x1b[0m`);
+        console.error(`  or`);
+        console.error(`  \x1b[36mbun add -g zenitest-cli@latest\x1b[0m\n`);
+        process.exit(1);
+      }
+    }
+  } catch {
+    // Ignore network error or timeout
+  }
+}
 
 function getConfigPath(): string {
   const dir = join(homedir(), ".zenitest");
@@ -98,14 +146,7 @@ function loadLocalSecrets(testDir?: string): Record<string, string> {
     }
   }
 
-  // Fallback to process.env
-  for (const [k, v] of Object.entries(process.env)) {
-    if (v !== undefined && (k.startsWith("SECRET_") || k.includes("PASSWORD"))) {
-      if (!secrets[k]) secrets[k] = v;
-      const strippedKey = k.replace(/^SECRET_/, "");
-      if (!secrets[strippedKey]) secrets[strippedKey] = v;
-    }
-  }
+
 
   return secrets;
 }
@@ -136,6 +177,7 @@ Options:
   --platform, -t      Platform target to execute: web, ios, android (defaults to all)
   --bundle, -b        Path to built mobile app binary (.ipa or .apk)
   --parallel, -p      Number of test cases to run in parallel (defaults to 5)
+  --version, -v       Show CLI version
   --help, -h          Show this help message
 `);
 }
@@ -172,14 +214,15 @@ function parseArgs(args: string[]) {
   if (options.t) options.platform = options.t;
   if (options.target) options.platform = options.target;
   if (options.b) options.bundle = options.b;
+  if (options.v) options.version = options.v;
   if (options.h) options.help = options.h;
 
   return options;
 }
 
-const API_BASE_URL = process.env.ZENITEST_API_URL || process.env.API_URL || "http://localhost:3001";
-const WS_BASE_URL = process.env.ZENITEST_WS_URL || process.env.WS_URL || "ws://localhost:3001";
-const APP_BASE_URL = process.env.ZENITEST_APP_URL || process.env.APP_URL || "https://app.zenitest.ai";
+const API_BASE_URL = "https://api.zenitest.ai";
+const WS_BASE_URL = "wss://api.zenitest.ai";
+const APP_BASE_URL = "https://app.zenitest.ai";
 
 async function verifyApiKey(apiKey: string): Promise<{ valid: boolean; user?: any }> {
   try {
@@ -946,8 +989,8 @@ async function runTests(options: Record<string, any>) {
       formData.append("platform", "ios");
       formData.append("testCases", JSON.stringify(iosTestCases));
       if (executionId) formData.append("executionId", executionId);
-      if (secrets.AWS_PROJECT_ARN || process.env.AWS_PROJECT_ARN) {
-        formData.append("awsProjectArn", secrets.AWS_PROJECT_ARN || process.env.AWS_PROJECT_ARN || "");
+      if (secrets.AWS_PROJECT_ARN) {
+        formData.append("awsProjectArn", secrets.AWS_PROJECT_ARN);
       }
 
       const res = await fetch(`${API_BASE_URL}/api/executions/mobile`, {
@@ -1021,8 +1064,8 @@ async function runTests(options: Record<string, any>) {
       formData.append("platform", "android");
       formData.append("testCases", JSON.stringify(androidTestCases));
       if (executionId) formData.append("executionId", executionId);
-      if (secrets.AWS_PROJECT_ARN || process.env.AWS_PROJECT_ARN) {
-        formData.append("awsProjectArn", secrets.AWS_PROJECT_ARN || process.env.AWS_PROJECT_ARN || "");
+      if (secrets.AWS_PROJECT_ARN) {
+        formData.append("awsProjectArn", secrets.AWS_PROJECT_ARN);
       }
 
       const res = await fetch(`${API_BASE_URL}/api/executions/mobile`, {
@@ -1268,10 +1311,17 @@ async function main() {
   const args = process.argv.slice(2);
   const options = parseArgs(args);
 
+  if (options.version) {
+    console.log(`zenitest-cli v${CURRENT_VERSION}`);
+    process.exit(0);
+  }
+
   if (options.help || args.length === 0) {
     showHelp();
     process.exit(0);
   }
+
+  await checkForLatestVersion();
 
   const command = options._[0];
 

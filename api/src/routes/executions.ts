@@ -55,9 +55,10 @@ async function analyzeTestCaseBug(
 
     const ai = new GoogleGenAI({ apiKey: key });
     const modelName =
-      process.env.STAGEHAND_MODEL ||
+      process.env.GEMINI_MODEL ||
       process.env.ZENI_MODEL ||
-      "gemini-2.5-flash-lite";
+      process.env.STAGEHAND_MODEL ||
+      "gemini-3.5-flash-lite";
 
     const cleanedSteps = (stepReports || [])
       .filter((s: any) => s.type !== "__meta__")

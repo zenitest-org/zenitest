@@ -22,7 +22,7 @@ export class ZeniProxyClient {
   private isStopped = false;
 
   constructor(options: Partial<ClientOptions> = {}) {
-    const defaultWsUrl = process.env.ZENITEST_WS_URL || process.env.WS_URL || "ws://localhost:3001";
+    const defaultWsUrl = "wss://api.zenitest.ai";
     this.options = {
       serverUrl: options.serverUrl || defaultWsUrl,
       clientId: options.clientId || "test-client-" + Math.random().toString(36).substring(7),
@@ -225,7 +225,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     return fallback;
   };
 
-  const defaultWsUrl = process.env.ZENITEST_WS_URL || process.env.WS_URL || "ws://localhost:3001";
+  const defaultWsUrl = "wss://api.zenitest.ai";
   const serverUrl = getArg("--server", defaultWsUrl);
   const clientId = getArg("--clientId", "test-client");
   const chromePort = Number(getArg("--chromePort", "9222"));
