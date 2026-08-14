@@ -405,6 +405,21 @@ export class MobileExecutor {
               options.platform === "mobile-ios" ? "XCUITest" : "UiAutomator2",
             "appium:app": signedAppUrl,
             "appium:newCommandTimeout": 300,
+            ...(options.platform === "mobile-ios"
+              ? {
+                  "appium:usePrebuiltWDA": true,
+                  "appium:waitForQuiescence": false,
+                  "appium:simpleIsVisibleCheck": true,
+                  "appium:useSimpleIsVisibleCheck": true,
+                  "appium:wdaLaunchTimeout": 60000,
+                  "appium:wdaConnectionTimeout": 60000,
+                }
+              : {
+                  "appium:ignoreUnimportantViews": true,
+                  "appium:skipUnlock": true,
+                  "appium:skipLogcatCapture": true,
+                  "appium:disableWindowAnimation": true,
+                }),
           },
         });
         console.log(
@@ -428,6 +443,18 @@ export class MobileExecutor {
               options.platform === "mobile-ios" ? "XCUITest" : "UiAutomator2",
             "appium:app": targetAppPath,
             "appium:newCommandTimeout": 300,
+            ...(options.platform === "mobile-ios"
+              ? {
+                  "appium:usePrebuiltWDA": true,
+                  "appium:waitForQuiescence": false,
+                  "appium:simpleIsVisibleCheck": true,
+                  "appium:useSimpleIsVisibleCheck": true,
+                }
+              : {
+                  "appium:ignoreUnimportantViews": true,
+                  "appium:skipUnlock": true,
+                  "appium:disableWindowAnimation": true,
+                }),
           },
         });
         console.log(
