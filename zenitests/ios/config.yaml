@@ -1,0 +1,4 @@
+# iOS Mobile Testing Configuration
+bundlePath: sample-apps/flutter_sample_app/build/ios/iphonesimulator/Runner.app
+device: iPhone 17
+parallel: 1

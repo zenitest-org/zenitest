@@ -17,7 +17,7 @@ import {
 
 
 import { Executor } from "../executor";
-import { MobileExecutor, uploadAppBinaryToSupabase } from "../mobile-executor";
+import { MobileExecutor } from "../mobile-executor";
 import { TestCase, TestCaseExecutionReport } from "../types";
 import { authMiddleware, AuthUser } from "../middleware/auth";
 import { GoogleGenAI, Type } from "@google/genai";
@@ -1108,8 +1108,6 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
       }
 
       return c.json({ success: true, data: updatedExecution });
-
-
     } catch (err: any) {
       console.error("[Executions Route] Exception completing execution:", err);
       return c.json({ success: false, error: err.message || String(err) }, 500);
@@ -1119,7 +1117,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
   router.post("/mobile", async (c) => {
     try {
       const authUser = c.get("user") as AuthUser;
-      const body = await c.req.parseBody();
+      const body = (await c.req.json().catch(async () => await c.req.parseBody().catch(() => ({})))) as any;
 
       let testCases: TestCase[] = [];
       if (typeof body.testCases === "string") {
@@ -1133,7 +1131,6 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
       const runnerPlatform: "mobile-ios" | "mobile-android" =
         normalizedPlatform === "android" ? "mobile-android" : "mobile-ios";
 
-      // Check plan usage limitation for mobile testing
       const limitCheck = await checkUserLimitation(authUser.id, normalizedPlatform);
       if (!limitCheck.allowed) {
         console.warn(`[Mobile Execution Refused 🚫] User ${authUser.id} exceeded limitation:`, limitCheck.reason);
@@ -1148,39 +1145,27 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         );
       }
 
-      const appFile = body.appFile as File | undefined;
-      const appUrlFromReq = body.appUrl as string | undefined;
-      const awsProjectArn =
-        (body.awsProjectArn as string) || process.env.AWS_PROJECT_ARN;
-
-      let signedAppUrl = appUrlFromReq || "";
-      let localSavedPath: string | undefined;
-
-      if (appFile) {
-        const arrayBuffer = await appFile.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        const uploadDir = join(__dirname, "..", ".cache", "uploads");
-        if (!existsSync(uploadDir)) {
-          mkdirSync(uploadDir, { recursive: true });
-        }
-        localSavedPath = join(uploadDir, `${Date.now()}_${appFile.name}`);
-        writeFileSync(localSavedPath, buffer);
-        signedAppUrl = await uploadAppBinaryToSupabase(buffer, appFile.name);
-      }
-
-      if (!signedAppUrl) {
+      const clientId = (body.clientId as string) || c.req.header("x-client-id") || "";
+      const clientWs = clientId ? ctx.clients.get(clientId) : undefined;
+      if (!clientWs) {
         return c.json(
-          { success: false, error: "App binary file or appUrl is required." },
+          {
+            success: false,
+            error: `No active mobile client connected for clientId: ${clientId}`,
+          },
           400,
         );
       }
+
+      const appFilePath = (body.appFilePath as string) || undefined;
+      const bundleId = (body.bundleId as string) || undefined;
+      const deviceName = (body.deviceName as string) || undefined;
 
       const isStream =
         c.req.header("x-stream") === "true" || c.req.query("stream") === "true";
       const requestExecutionId =
         (body.executionId as string) || (body.execution_id as string);
 
-      // 1. Create main 'executions' record in Supabase DB (or reuse existing)
       let executionRecord: any = null;
       if (requestExecutionId) {
         const { data: existing } = await supabase
@@ -1231,9 +1216,6 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           );
         } else {
           executionRecord = createdExec;
-          console.log(
-            `[Mobile DB] Created execution record ID: ${executionRecord.id}`,
-          );
         }
       }
 
@@ -1245,7 +1227,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             );
           }
 
-          const mobileExecutor = new MobileExecutor(authUser.geminiApiKey);
+          const mobileExecutor = new MobileExecutor(clientWs, authUser.geminiApiKey);
           let passedCount = 0;
           let failedCount = 0;
           let totalDurationMs = 0;
@@ -1289,9 +1271,9 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
               tc,
               {
                 platform: runnerPlatform,
-                appUrl: signedAppUrl,
-                appFilePath: localSavedPath,
-                awsProjectArn,
+                appFilePath,
+                bundleId,
+                deviceName,
                 geminiApiKey: authUser.geminiApiKey,
               },
               (stepReport) => {
@@ -1336,21 +1318,22 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
               processedStepReports.push(reportCopy);
             }
 
-            const deviceName =
-              runnerPlatform === "mobile-ios"
-                ? "iPhone 15 Pro (iOS)"
-                : "Pixel 8 Pro (Android)";
+            const activeDevice =
+              deviceName ||
+              (runnerPlatform === "mobile-ios"
+                ? "iPhone Simulator (iOS)"
+                : "Android Emulator");
             const metaItem = {
               type: "__meta__",
               networkReports: report.networkReports || [],
               logReports: report.logReports || [],
               info: {
                 specFile: tc.id ? `${tc.id}.yaml` : "mobile-test.yaml",
-                device: deviceName,
-                browser: deviceName,
+                device: activeDevice,
+                browser: activeDevice,
                 platform: normalizedPlatform,
                 duration: `${(durationMs / 1000).toFixed(1)}s`,
-                url: signedAppUrl,
+                url: bundleId || "iOS App",
               },
             };
             const processedStepReportsWithMeta = [
@@ -1366,6 +1349,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                 network_reports: report.networkReports || [],
                 log_reports: report.logReports || [],
                 info: metaItem.info,
+                error_message: report.stepReports?.find((s) => !s.success)?.explanation || null,
                 completed_at: new Date().toISOString(),
               });
 
@@ -1392,7 +1376,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                 title: tc.title || "Untitled",
                 status: isSuccess ? "PASSED" : "FAILED",
                 durationMs,
-                error: report.error,
+                error: report.stepReports?.find((s) => !s.success)?.explanation,
               }),
             );
           }
@@ -1412,9 +1396,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
               .eq("id", executionRecord.id);
           }
 
-          // Track mobile usage excluding device initialization duration
           await trackUserUsage(authUser.id, normalizedPlatform, totalStepDurationMs);
-
 
           await stream.writeln(
             JSON.stringify({
@@ -1428,7 +1410,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         });
       }
 
-      const mobileExecutor = new MobileExecutor(authUser.geminiApiKey);
+      const mobileExecutor = new MobileExecutor(clientWs, authUser.geminiApiKey);
       const executionReports: TestCaseExecutionReport[] = [];
       let passedCount = 0;
       let failedCount = 0;
@@ -1439,7 +1421,6 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
       for (let idx = 0; idx < testCases.length; idx++) {
         const tc = testCases[idx];
 
-        // 2. Create 'execution_details' record in Supabase DB
         let detailRecord: any = null;
         if (executionRecord) {
           const { data: createdDetail, error: detailErr } = await supabase
@@ -1463,9 +1444,9 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         const tcStartTime = Date.now();
         const report = await mobileExecutor.executeTestCase(tc, {
           platform: runnerPlatform,
-          appUrl: signedAppUrl,
-          appFilePath: localSavedPath,
-          awsProjectArn,
+          appFilePath,
+          bundleId,
+          deviceName,
           geminiApiKey: authUser.geminiApiKey,
         });
         executionReports.push(report);
@@ -1479,7 +1460,6 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         totalStepDurationMs += report.stepExecutionTimeMs ?? durationMs;
         totalTokens += report.totalTokensUsed || 0;
 
-        // 3. Upload Step Screenshots to Supabase Storage & Sanitize
         const processedStepReports: any[] = [];
         for (const stepReport of report.stepReports || []) {
           const reportCopy = { ...stepReport };
@@ -1498,21 +1478,22 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           processedStepReports.push(reportCopy);
         }
 
-        const deviceName =
-          runnerPlatform === "mobile-ios"
-            ? "iPhone 15 Pro (iOS)"
-            : "Pixel 8 Pro (Android)";
+        const activeDevice =
+          deviceName ||
+          (runnerPlatform === "mobile-ios"
+            ? "iPhone Simulator (iOS)"
+            : "Android Emulator");
         const metaItem = {
           type: "__meta__",
           networkReports: report.networkReports || [],
           logReports: report.logReports || [],
           info: {
             specFile: tc.id ? `${tc.id}.yaml` : "mobile-test.yaml",
-            device: deviceName,
-            browser: deviceName,
+            device: activeDevice,
+            browser: activeDevice,
             platform: normalizedPlatform,
             duration: `${(durationMs / 1000).toFixed(1)}s`,
-            url: signedAppUrl,
+            url: bundleId || "iOS App",
           },
         };
         const processedStepReportsWithMeta = [
@@ -1520,7 +1501,6 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           metaItem,
         ];
 
-        // 4. Update 'execution_details' record in Supabase DB
         if (detailRecord) {
           const updateData: any = sanitizeForJsonb({
             status: isSuccess ? "passed" : "failed",
@@ -1532,7 +1512,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             completed_at: new Date().toISOString(),
           });
 
-          const { error: updateErr } = await supabase
+          await supabase
             .from("execution_details")
             .update(updateData)
             .eq("id", detailRecord.id);
@@ -1546,21 +1526,9 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             report.logReports || [],
             authUser.geminiApiKey,
           ).catch((e) => console.error("[BugAnalysis Error]:", e));
-
-          if (updateErr) {
-            console.error(
-              `[Mobile DB Warning] Failed to update execution detail ${detailRecord.id}:`,
-              updateErr,
-            );
-          } else {
-            console.log(
-              `[Mobile DB] Successfully saved execution details for test case "${tc.title}"`,
-            );
-          }
         }
       }
 
-      // 5. Update aggregate 'executions' record in Supabase DB
       if (executionRecord) {
         const finalStatus = failedCount > 0 ? "failed" : "completed";
         await supabase
@@ -1574,22 +1542,15 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             completed_at: new Date().toISOString(),
           })
           .eq("id", executionRecord.id);
-
-        console.log(
-          `[Mobile DB] Completed execution record ${executionRecord.id} with status: ${finalStatus}`,
-        );
       }
 
-      // Track mobile usage excluding device initialization duration
       await trackUserUsage(authUser.id, normalizedPlatform, totalStepDurationMs);
-
 
       return c.json({
         success: true,
         data: {
           executionId: executionRecord?.id,
-          appUrl: signedAppUrl,
-          platform,
+          platform: normalizedPlatform,
           reports: executionReports,
         },
       });

@@ -2,6 +2,7 @@
 
 import pkg from "../package.json";
 import { ClientWebExecutor } from "./clientWebExecutor";
+import { ClientIosExecutor } from "./clientIosExecutor";
 import {
   readdirSync,
   readFileSync,
@@ -946,6 +947,14 @@ async function runTests(options: Record<string, any>) {
   let iosTestCases: any[] = [];
   let androidTestCases: any[] = [];
 
+  const webDir = join(dirPath, "web");
+  const iosDir = existsSync(join(dirPath, "ios"))
+    ? join(dirPath, "ios")
+    : join(dirPath, "mobile-ios");
+  const androidDir = existsSync(join(dirPath, "android"))
+    ? join(dirPath, "android")
+    : join(dirPath, "mobile-android");
+
   if (rawTargets.length > 0) {
     const loadedFiles: any[] = [];
     for (const target of rawTargets) {
@@ -969,13 +978,6 @@ async function runTests(options: Record<string, any>) {
       .filter((tc) => (tc.platform || "").toLowerCase() === "android")
       .map((tc) => ({ ...tc, platform: "android" }));
   } else {
-    const webDir = join(dirPath, "web");
-    const iosDir = existsSync(join(dirPath, "ios"))
-      ? join(dirPath, "ios")
-      : join(dirPath, "mobile-ios");
-    const androidDir = existsSync(join(dirPath, "android"))
-      ? join(dirPath, "android")
-      : join(dirPath, "mobile-android");
 
     const filterPlatform = (
       options.platform ||
@@ -1176,48 +1178,114 @@ async function runTests(options: Record<string, any>) {
     }
   };
 
+function loadIosConfig(iosDir: string): {
+  bundlePath?: string;
+  device?: string;
+  parallel?: number;
+} {
+  const possiblePaths = [
+    join(iosDir, "config.yaml"),
+    join(iosDir, "config.yml"),
+    join(iosDir, "config.json"),
+  ];
+  for (const p of possiblePaths) {
+    if (existsSync(p)) {
+      try {
+        const content = readFileSync(p, "utf-8");
+        const parsed = p.endsWith(".json") ? JSON.parse(content) : parseYaml(content);
+        if (parsed && typeof parsed === "object") {
+          return {
+            bundlePath: parsed.bundlePath || parsed.bundle || parsed.appPath || parsed.app,
+            device: parsed.device || parsed.deviceName,
+            parallel: parsed.parallel ? Number(parsed.parallel) : undefined,
+          };
+        }
+      } catch {}
+    }
+  }
+  return {};
+}
+
   // 2. Mobile iOS Tests Task
   const runIos = async () => {
     if (iosTestCases.length === 0) return;
+    const clientId = `client_ios_${crypto.randomUUID()}`;
+    const secrets = loadLocalSecrets(dirPath);
+    const iosConfig = iosDir && existsSync(iosDir) ? loadIosConfig(iosDir) : {};
+
+    const rawBundlePath =
+      options.bundle ||
+      options.b ||
+      options["app-ios"] ||
+      iosConfig.bundlePath ||
+      undefined;
+
+    let iosAppPath: string | undefined = undefined;
+    if (rawBundlePath) {
+      if (existsSync(rawBundlePath)) {
+        iosAppPath = resolve(process.cwd(), rawBundlePath);
+      } else if (iosDir && existsSync(resolve(iosDir, rawBundlePath))) {
+        iosAppPath = resolve(iosDir, rawBundlePath);
+      } else {
+        iosAppPath = resolve(process.cwd(), rawBundlePath);
+      }
+    }
+
+    const deviceName =
+      options.device ||
+      options.d ||
+      iosConfig.device ||
+      undefined;
+
+    const parallelCount =
+      options.parallel ||
+      options.p ||
+      iosConfig.parallel ||
+      1;
+
+    const client = new ClientIosExecutor({
+      serverUrl: WS_BASE_URL,
+      clientId,
+      appFilePath: iosAppPath,
+      bundleId: options.bundleId,
+      deviceName,
+      secrets,
+    });
+
     try {
-      const iosAppPath =
-        options.bundle ||
-        options.b ||
-        options["app-ios"] ||
-        resolve(
-          process.cwd(),
-          "sample-apps/flutter_sample_app/build/ios/ipa/Runner.ipa",
-        );
-      if (!existsSync(iosAppPath)) {
-        for (const tc of iosTestCases) {
-          renderer.completeTest(
-            tc.id,
-            "FAILED",
-            0,
-            `iOS binary not found at ${iosAppPath}`,
-          );
+      await client.start();
+
+      // Inject local secrets into test case variables
+      const injectedIosTestCases = iosTestCases.map((tc) => {
+        const mergedVariables = { ...(tc.variables || {}) };
+        for (const [secKey, secVal] of Object.entries(secrets)) {
+          mergedVariables[`secret.${secKey}`] = secVal;
         }
-        return;
-      }
-      const secrets = loadLocalSecrets(dirPath);
-      const formData = new FormData();
-      const fileData = readFileSync(iosAppPath);
-      formData.append("appFile", new Blob([fileData]), basename(iosAppPath));
-      formData.append("platform", "ios");
-      formData.append("testCases", JSON.stringify(iosTestCases));
-      if (executionId) formData.append("executionId", executionId);
-      if (secrets.AWS_PROJECT_ARN) {
-        formData.append("awsProjectArn", secrets.AWS_PROJECT_ARN);
-      }
+        return {
+          ...tc,
+          variables: mergedVariables,
+        };
+      });
 
       const res = await fetch(`${API_BASE_URL}/api/executions/mobile`, {
         method: "POST",
         headers: {
+          "Content-Type": "application/json",
           "x-api-key": apiKey,
           Authorization: `Bearer ${apiKey}`,
           "x-stream": "true",
+          "x-client-id": clientId,
         },
-        body: formData,
+        body: JSON.stringify({
+          clientId,
+          platform: "ios",
+          testCases: injectedIosTestCases,
+          appFilePath: iosAppPath,
+          bundleId: options.bundleId,
+          deviceName,
+          parallel: parallelCount,
+          executionId,
+        }),
       });
 
       if (!res.ok) {
@@ -1261,6 +1329,7 @@ async function runTests(options: Record<string, any>) {
                   msg.testCaseId,
                   msg.status,
                   msg.durationMs,
+                  msg.error,
                 );
               else if (msg.type === "execution_complete") {
                 if (msg.failedCount > 0) exitCode = 1;
@@ -1274,6 +1343,8 @@ async function runTests(options: Record<string, any>) {
       for (const tc of iosTestCases) {
         renderer.completeTest(tc.id, "FAILED", 0, errMsg);
       }
+    } finally {
+      await client.stop();
     }
   };
 

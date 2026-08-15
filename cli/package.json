@@ -14,7 +14,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "bun build ./src/cli.ts --outdir ./dist --target node --external playwright",
+    "build": "bun build ./src/cli.ts --outdir ./dist --target node --external playwright --external webdriverio",
     "prepublishOnly": "bun run build"
   },
   "keywords": [
@@ -34,6 +34,7 @@
     "dotenv": "^17.4.2",
     "js-yaml": "^5.2.2",
     "playwright": "^1.51.0",
+    "webdriverio": "^8.24.0",
     "ws": "^8.21.1",
     "yaml": "^2.9.0"
   },
