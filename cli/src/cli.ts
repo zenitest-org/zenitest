@@ -197,7 +197,11 @@ Commands:
 Options:
   --dir, -d           Directory containing test cases (defaults to zenitests)
   --platform, -t      Platform target to execute: web, ios, android (defaults to all)
-  --bundle, -b        Path to built mobile app binary (.ipa or .apk)
+  --env, -e           Target environment for web tests: prod (default) or local
+  --local             Run web tests against localURL
+  --prod              Run web tests against prodURL
+  --bundle, -b        Path to built mobile app binary (.ipa, .app, or .apk)
+  --device, -d        Target iOS device name or simulator (defaults to config or iPhone 17)
   --parallel, -p      Number of test cases to run in parallel (defaults to 5)
   --version, -v       Show CLI version
   --help, -h          Show this help message
@@ -235,7 +239,12 @@ function parseArgs(args: string[]) {
   if (options.c) options.parallel = options.c;
   if (options.t) options.platform = options.t;
   if (options.target) options.platform = options.target;
+  if (options.web) options.platform = "web";
+  if (options.ios) options.platform = "ios";
+  if (options.android) options.platform = "android";
   if (options.b) options.bundle = options.b;
+  if (options.e) options.env = options.e;
+  if (options.environment) options.env = options.environment;
   if (options.v) options.version = options.v;
   if (options.h) options.help = options.h;
 
@@ -1077,11 +1086,49 @@ async function runTests(options: Record<string, any>) {
 
   let exitCode = 0;
 
+function loadWebConfig(webDir: string): {
+  localURL?: string;
+  prodURL?: string;
+  parallel?: number;
+} {
+  const possiblePaths = [
+    join(webDir, "config.yaml"),
+    join(webDir, "config.yml"),
+    join(webDir, "config.json"),
+  ];
+  for (const p of possiblePaths) {
+    if (existsSync(p)) {
+      try {
+        const content = readFileSync(p, "utf-8");
+        const parsed = p.endsWith(".json") ? JSON.parse(content) : parseYaml(content);
+        if (parsed && typeof parsed === "object") {
+          return {
+            localURL: parsed.localURL || parsed.localUrl || parsed.local,
+            prodURL: parsed.prodURL || parsed.prodUrl || parsed.prod,
+            parallel: parsed.parallel ? Number(parsed.parallel) : undefined,
+          };
+        }
+      } catch {}
+    }
+  }
+  return {};
+}
+
   // 1. Web Tests Task
   const runWeb = async () => {
     if (allWebTestCases.length === 0) return;
     const clientId = await fetchServerClientId(apiKey);
     const secrets = loadLocalSecrets(dirPath);
+    const webConfig = webDir && existsSync(webDir) ? loadWebConfig(webDir) : {};
+
+    const targetEnv = (
+      options.local ? "local" : options.prod ? "prod" : options.env || options.e || "prod"
+    ).toLowerCase();
+
+    const parallel = Number(
+      options.parallel || options.p || options.concurrency || options.c || webConfig.parallel || 5,
+    );
+
     const client = new ClientWebExecutor({
       serverUrl: WS_BASE_URL,
       clientId,
@@ -1091,15 +1138,17 @@ async function runTests(options: Record<string, any>) {
 
     try {
       await client.start();
-      const parallel = Number(
-        options.parallel || options.p || options.concurrency || options.c || 5,
-      );
       const testCasesWithSecrets = allWebTestCases.map((tc) => {
         const vars = { ...(tc.variables || {}) };
         for (const [k, v] of Object.entries(secrets)) {
           vars[`secret.${k}`] = v;
         }
-        return { ...tc, variables: vars };
+        return {
+          ...tc,
+          localURL: webConfig.localURL || tc.localURL || tc.localUrl,
+          prodURL: webConfig.prodURL || tc.prodURL || tc.prodUrl,
+          variables: vars,
+        };
       });
 
       const response = await fetch(`${API_BASE_URL}/api/executions/create`, {
@@ -1117,6 +1166,9 @@ async function runTests(options: Record<string, any>) {
           parallel,
           platform: "web",
           platforms: ["web"],
+          env: targetEnv,
+          localURL: webConfig.localURL,
+          prodURL: webConfig.prodURL,
         }),
       });
 

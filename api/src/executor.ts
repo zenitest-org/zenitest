@@ -344,6 +344,9 @@ const VALIDATE_SCHEMA = {
 
 export interface ExecutorOptions {
   sendScreenshot?: boolean;
+  localUrl?: string;
+  prodUrl?: string;
+  env?: "prod" | "local" | string;
 }
 
 export class Executor {
@@ -471,13 +474,14 @@ export class Executor {
         try {
           if (step.type === "navigate") {
             const navPath = step.url || step.description || "/";
-            const localUrl = testCase.localUrl || testCase.localURL;
-            const prodUrl = testCase.prodUrl || testCase.prodURL;
+            const localUrl = testCase.localUrl || testCase.localURL || options?.localUrl;
+            const prodUrl = testCase.prodUrl || testCase.prodURL || options?.prodUrl;
+            const targetEnv = (options?.env === "local" ? "local" : "prod") as "prod" | "local";
             const targetUrl = resolveFullURL(
               navPath,
               localUrl,
               prodUrl,
-              "prod",
+              targetEnv,
             );
             console.log(`[Executor] Instructing client to navigate to ${targetUrl}`);
 

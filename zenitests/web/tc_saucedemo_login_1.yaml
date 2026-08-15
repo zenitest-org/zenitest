@@ -2,8 +2,6 @@ id: tc_saucedemo_login_1
 title: SauceDemo Login Test Case with Secret Credentials
 priority: high
 
-localUrl: http://localhost:3000
-prodURL: https://www.saucedemo.com
 
 variables:
   username: standard_user

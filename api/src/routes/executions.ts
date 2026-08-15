@@ -528,12 +528,20 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           let failedCount = 0;
           let totalDurationMs = 0;
 
+          const bodyLocalUrl = (body.localUrl || body.localURL || undefined) as string | undefined;
+          const bodyProdUrl = (body.prodUrl || body.prodURL || undefined) as string | undefined;
+          const bodyEnv = ((body.env || body.environment || "prod") as string).toLowerCase();
+
           const executor = new Executor(clientWs);
 
           await runConcurrentTasks(testCasesArray, parallel, async (tc) => {
             const tcPlatform = normalizePlatform(
               (tc as any).platform || bodyPlatform,
             );
+            const effLocal = tc.localURL || tc.localUrl || bodyLocalUrl;
+            const effProd = tc.prodURL || tc.prodUrl || bodyProdUrl;
+            const effTarget = bodyEnv === "local" ? (effLocal || effProd) : (effProd || effLocal);
+
             const { data: detailRecord } = await supabase
               .from("execution_details")
               .insert({
@@ -542,12 +550,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                 title: tc.title || "Untitled Test Case",
                 status: "running",
                 platform: tcPlatform,
-                target_url:
-                  tc.prodURL ||
-                  tc.prodUrl ||
-                  tc.localURL ||
-                  tc.localUrl ||
-                  null,
+                target_url: effTarget || null,
                 started_at: new Date().toISOString(),
               })
               .select()
@@ -569,14 +572,18 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                     }),
                   );
                 },
+                {
+                  localUrl: bodyLocalUrl,
+                  prodUrl: bodyProdUrl,
+                  env: bodyEnv,
+                },
               );
             } catch (err: any) {
               report = {
                 testCaseId: tc.id || "unknown",
                 title: tc.title || "Untitled",
                 overallSuccess: false,
-                targetURL:
-                  tc.prodURL || tc.prodUrl || tc.localURL || tc.localUrl || "",
+                targetURL: effTarget || "",
                 stepReports: [],
                 totalExecutionTimeMs: Date.now() - startTime,
                 totalTokensUsed: 0,

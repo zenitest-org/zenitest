@@ -1,0 +1,4 @@
+# Web Testing Configuration
+localURL: http://localhost:3000
+prodURL: https://www.saucedemo.com
+parallel: 2
