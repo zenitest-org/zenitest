@@ -14,10 +14,8 @@
     "README.md"
   ],
   "scripts": {
-    "build": "bun build ./src/cli.ts --outdir ./dist --target node",
-    "prepublishOnly": "bun run build",
-    "client": "tsx src/proxyClient.ts",
-    "download-chrome": "tsx src/download-chrome.ts"
+    "build": "bun build ./src/cli.ts --outdir ./dist --target node --external playwright",
+    "prepublishOnly": "bun run build"
   },
   "keywords": [
     "zenitest",
@@ -35,6 +33,7 @@
   "dependencies": {
     "dotenv": "^17.4.2",
     "js-yaml": "^5.2.2",
+    "playwright": "^1.51.0",
     "ws": "^8.21.1",
     "yaml": "^2.9.0"
   },

@@ -11,7 +11,6 @@ export class ZeniServer {
   private wss: WebSocketServer;
   private port: number;
   private clients = new Map<string, WebSocket>();
-  private browsers = new Map<string, WebSocket>();
 
   constructor(port = Number(process.env.PORT) || 3001) {
     this.port = port;
@@ -45,12 +44,11 @@ export class ZeniServer {
       }
 
       const clientMatch = pathname.match(/^\/client\/(.+)$/);
-      const browserMatch = pathname.match(/^\/browser\/(.+)$/);
 
       if (clientMatch) {
         const clientId = clientMatch[1];
         this.wss.handleUpgrade(request, socket, head, (ws) => {
-          console.log(`[Server] Proxy Client connected: ${clientId}`);
+          console.log(`[Server] Client Executor connected: ${clientId}`);
 
           const existing = this.clients.get(clientId);
           if (existing) {
@@ -59,14 +57,9 @@ export class ZeniServer {
           this.clients.set(clientId, ws);
 
           ws.on("close", () => {
-            console.log(`[Server] Proxy Client disconnected: ${clientId}`);
+            console.log(`[Server] Client Executor disconnected: ${clientId}`);
             if (this.clients.get(clientId) === ws) {
               this.clients.delete(clientId);
-            }
-            const browserWs = this.browsers.get(clientId);
-            if (browserWs) {
-              browserWs.close();
-              this.browsers.delete(clientId);
             }
           });
 
@@ -74,77 +67,12 @@ export class ZeniServer {
             console.error(`[Server] Client WS error (${clientId}):`, err);
             ws.close();
           });
-
-          this.bridgeIfBothConnected(clientId);
-        });
-        return;
-      }
-
-      if (browserMatch) {
-        const clientId = browserMatch[1];
-        this.wss.handleUpgrade(request, socket, head, (ws) => {
-          console.log(`[Server] Browser (Playwright) connecting for client: ${clientId}`);
-
-          const existing = this.browsers.get(clientId);
-          if (existing) {
-            existing.close();
-          }
-          this.browsers.set(clientId, ws);
-
-          ws.on("close", () => {
-            console.log(`[Server] Browser (Playwright) disconnected: ${clientId}`);
-            if (this.browsers.get(clientId) === ws) {
-              this.browsers.delete(clientId);
-            }
-          });
-
-          ws.on("error", (err) => {
-            console.error(`[Server] Browser WS error (${clientId}):`, err);
-            ws.close();
-          });
-
-          this.bridgeIfBothConnected(clientId);
         });
         return;
       }
 
       socket.destroy();
     });
-  }
-
-  private bridgeIfBothConnected(clientId: string) {
-    const clientWs = this.clients.get(clientId);
-    const browserWs = this.browsers.get(clientId);
-
-    if (clientWs && browserWs) {
-      console.log(
-        `[Server] Bridging CDP tunnel for client ${clientId}. Client state: ${clientWs.readyState}, Browser state: ${browserWs.readyState}`
-      );
-
-      // Clear previous message listeners
-      clientWs.removeAllListeners("message");
-      browserWs.removeAllListeners("message");
-
-      clientWs.on("message", (data, isBinary) => {
-        const str = data.toString();
-        console.log(
-          `[Server Bridge] [Client -> Browser] data: ${str.slice(0, 150)}${str.length > 150 ? "..." : ""}`
-        );
-        if (browserWs.readyState === WebSocket.OPEN) {
-          browserWs.send(data, { binary: isBinary });
-        }
-      });
-
-      browserWs.on("message", (data, isBinary) => {
-        const str = data.toString();
-        console.log(
-          `[Server Bridge] [Browser -> Client] data: ${str.slice(0, 150)}${str.length > 150 ? "..." : ""}`
-        );
-        if (clientWs.readyState === WebSocket.OPEN) {
-          clientWs.send(data, { binary: isBinary });
-        }
-      });
-    }
   }
 
   public async start(): Promise<void> {

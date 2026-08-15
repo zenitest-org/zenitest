@@ -7,7 +7,6 @@ import { streamText } from "hono/streaming";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 import { WebSocket } from "ws";
-import { chromium } from "playwright-core";
 import {
   supabase,
   uploadScreenshot,
@@ -429,7 +428,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         return c.json(
           {
             success: false,
-            error: `No active proxy client connected for clientId: ${clientId}`,
+            error: `No active web executor client connected for clientId: ${clientId}`,
           },
           400,
         );
@@ -509,7 +508,16 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         return c.json({ success: true, data: execution }, 201);
       }
 
-      const wsUrl = `ws://localhost:${ctx.port}/browser/${clientId}`;
+      const clientWs = ctx.clients.get(clientId);
+      if (!clientWs || clientWs.readyState !== WebSocket.OPEN) {
+        return c.json(
+          {
+            success: false,
+            error: `Client executor '${clientId}' is not connected over WebSocket.`,
+          },
+          400,
+        );
+      }
 
       if (isStream) {
         return streamText(c, async (stream) => {
@@ -520,25 +528,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           let failedCount = 0;
           let totalDurationMs = 0;
 
-          let browser: any = null;
-          try {
-            browser = await chromium.connectOverCDP(wsUrl);
-          } catch (connErr: any) {
-            console.error("[Executions Route] CDP Connection Error:", connErr);
-            await stream.writeln(
-              JSON.stringify({
-                type: "execution_complete",
-                executionId: execution.id,
-                passedCount: 0,
-                failedCount: testCasesArray.length,
-                totalDurationMs: 0,
-                error: connErr.message || String(connErr),
-              }),
-            );
-            return;
-          }
-
-          const executor = new Executor(wsUrl);
+          const executor = new Executor(clientWs);
 
           await runConcurrentTasks(testCasesArray, parallel, async (tc) => {
             const tcPlatform = normalizePlatform(
@@ -564,14 +554,11 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
               .single();
 
             const startTime = Date.now();
-            let context: any = null;
             let report: TestCaseExecutionReport;
 
             try {
-              context = await browser.newContext();
               report = await executor.runWithContext(
                 tc,
-                context,
                 (progress) => {
                   stream.writeln(
                     JSON.stringify({
@@ -595,8 +582,6 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                 totalTokensUsed: 0,
                 error: err.message || String(err),
               };
-            } finally {
-              if (context) await context.close().catch(() => {});
             }
 
             const durationMs =
@@ -702,8 +687,6 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             );
           });
 
-          await browser.close().catch(() => {});
-
           await supabase
             .from("executions")
             .update({
@@ -735,25 +718,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
       let totalDurationMs = 0;
       let totalTokens = 0;
 
-      let browser: any = null;
-      try {
-        browser = await chromium.connectOverCDP(wsUrl);
-      } catch (connErr: any) {
-        console.error("[Executions Route] CDP Connection Error:", connErr);
-        await supabase
-          .from("executions")
-          .update({
-            status: "failed",
-            completed_at: new Date().toISOString(),
-          })
-          .eq("id", execution.id);
-        return c.json(
-          { success: false, error: connErr.message || String(connErr) },
-          500,
-        );
-      }
-
-      const executor = new Executor(wsUrl);
+      const executor = new Executor(clientWs);
 
       await runConcurrentTasks(testCasesArray, parallel, async (tc) => {
         const tcPlatform = normalizePlatform(
@@ -777,11 +742,9 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         if (detailErr || !detailRecord) return;
 
         const startTime = Date.now();
-        let context: any = null;
         let report: TestCaseExecutionReport;
         try {
-          context = await browser.newContext();
-          report = await executor.runWithContext(tc, context);
+          report = await executor.runWithContext(tc);
         } catch (runErr: any) {
           report = {
             testCaseId: tc.id || "unknown",
@@ -794,8 +757,6 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             totalTokensUsed: 0,
             error: runErr.message || String(runErr),
           };
-        } finally {
-          if (context) await context.close().catch(() => {});
         }
 
         const endTime = Date.now();
@@ -892,8 +853,6 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
             .eq("id", detailRecord.id);
         }
       });
-
-      await browser.close().catch(() => {});
 
       const overallStatus = failedCount > 0 ? "failed" : "completed";
       const { data: updatedExecution } = await supabase

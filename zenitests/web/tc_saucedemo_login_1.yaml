@@ -1,0 +1,22 @@
+id: tc_saucedemo_login_1
+title: SauceDemo Login Test Case with Secret Credentials
+priority: high
+
+localUrl: http://localhost:3000
+prodURL: https://www.saucedemo.com
+
+variables:
+  username: standard_user
+
+expectedResult: Swag Labs inventory page is displayed after login.
+
+steps:
+  - navigate: /
+
+  - act: Type '${username}' into the 'Username' input field
+
+  - act: Type '${secret.SAUCE_PASSWORD}' into the 'Password' input field
+
+  - act: Click on the 'Login' button
+
+  - validate: Verify that the product inventory container or 'Products' page title is displayed on the page

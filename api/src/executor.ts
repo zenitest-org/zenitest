@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { chromium, Page, Locator } from "playwright-core";
+import { WebSocket } from "ws";
 import { GoogleGenAI, Type } from "@google/genai";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { fileURLToPath } from "url";
@@ -12,6 +12,11 @@ import {
   DOMElement,
   ActResult,
   StepResult,
+  ServerRpcMessage,
+  ServerRpcMessageType,
+  ClientRpcMessage,
+  NetworkReportItem,
+  LogReportItem,
 } from "./types";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -93,360 +98,106 @@ export class ExecutorCache {
 }
 
 /* ==========================================================================
-   Helper Functions for DOM Setteled & State Extraction
+   WebSocket RPC Session Manager
    ========================================================================== */
 
-async function waitForDomNetworkQuiet(
-  page: Page,
-  timeoutMs: number = 3000,
-): Promise<void> {
-  try {
-    await page
-      .waitForLoadState("domcontentloaded", {
-        timeout: Math.min(timeoutMs, 2000),
-      })
-      .catch(() => {});
-    await page.waitForTimeout(300);
-  } catch {
-    // Ignore timeout errors during settling
+export class ClientWebSocketSession {
+  private ws: WebSocket;
+  private pendingRequests = new Map<
+    string,
+    {
+      resolve: (data: any) => void;
+      reject: (err: any) => void;
+    }
+  >();
+
+  constructor(ws: WebSocket) {
+    this.ws = ws;
+    this.ws.on("message", (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString()) as ClientRpcMessage;
+        if (msg.id && this.pendingRequests.has(msg.id)) {
+          const handler = this.pendingRequests.get(msg.id)!;
+          this.pendingRequests.delete(msg.id);
+          if (msg.success) {
+            handler.resolve(msg);
+          } else {
+            handler.reject(new Error(msg.error || "Client RPC request failed"));
+          }
+        }
+      } catch (err) {
+        console.warn("[ClientWebSocketSession] Failed to parse client response:", err);
+      }
+    });
   }
-}
 
-async function extractPageState(page: Page): Promise<{
-  elements: DOMElement[];
-  screenshotBase64: string;
-  title: string;
-  url: string;
-}> {
-  await waitForDomNetworkQuiet(page);
-  const screenshotBuffer = await page.screenshot({ type: "png" });
-  const screenshotBase64 = screenshotBuffer.toString("base64");
-  const title = await page.title();
-  const url = page.url();
+  public async sendRequest<T = any>(
+    type: ServerRpcMessageType,
+    payload: Partial<ServerRpcMessage> = {},
+    timeoutMs: number = 60000,
+  ): Promise<T> {
+    const id = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+    const msg: ServerRpcMessage = { type, id, ...payload };
 
-  const elementsScript = `
-    (() => {
-      const sibIndex = (n) => {
-        if (!n || !n.parentNode) return 1;
-        let i = 1;
-        const targetKey = n.nodeType + ':' + (n.nodeName || '').toLowerCase();
-        for (let p = n.previousSibling; p; p = p.previousSibling) {
-          const key = p.nodeType + ':' + (p.nodeName || '').toLowerCase();
-          if (key === targetKey) i += 1;
+    return new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (this.pendingRequests.has(id)) {
+          this.pendingRequests.delete(id);
+          reject(new Error(`RPC request '${type}' timed out after ${timeoutMs}ms`));
         }
-        return i;
-      };
+      }, timeoutMs);
 
-      const computeAbsoluteXPath = (node) => {
-        const parts = [];
-        let cur = node;
-        while (cur && cur.nodeType !== Node.DOCUMENT_NODE) {
-          if (cur.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
-            parts.push('//');
-            cur = cur.host || null;
-            continue;
-          }
-          const tag = (cur.nodeName || '').toLowerCase();
-          const step = tag.indexOf(':') !== -1 ? "*[name()='" + tag + "']" : tag + '[' + sibIndex(cur) + ']';
-          parts.push(step);
-          cur = cur.parentNode;
-        }
-        parts.reverse();
-        return '/' + parts.join('/');
-      };
-
-      const interactiveSelectors = [
-        "a[href]", "button", "input", "textarea", "select", "details", "summary", "form",
-        "[role='button']", "[role='link']", "[role='searchbox']", "[role='textbox']",
-        "[role='checkbox']", "[role='radio']", "[role='combobox']", "[role='option']",
-        "[role='menuitem']", "[role='tab']", "[onclick]", "[tabindex]",
-        "h1", "h2", "h3", "h4", "nav", "main", "header", "footer"
-      ].join(",");
-
-      const collectInteractiveElements = (root) => {
-        let list = Array.from(root.querySelectorAll(interactiveSelectors));
-        const allNodes = root.querySelectorAll('*');
-        for (let i = 0; i < allNodes.length; i++) {
-          const node = allNodes[i];
-          if (node.shadowRoot) {
-            list = list.concat(collectInteractiveElements(node.shadowRoot));
-          }
-        }
-        return list;
-      };
-
-      const rawElements = collectInteractiveElements(document);
-
-      return rawElements.map((el, index) => {
-        const element = el;
-        const existingId = element.getAttribute("id");
-        const elementId = existingId ? existingId : "elem-" + index;
-        element.setAttribute("data-element-id", String(elementId));
-
-        const tagName = element.tagName;
-        const text = (element.innerText || element.textContent || "").trim().replace(/\s+/g, " ").slice(0, 200);
-        const placeholder = element.getAttribute("placeholder") || undefined;
-        const ariaLabel = element.getAttribute("aria-label") || undefined;
-        const role = element.getAttribute("role") || undefined;
-        const href = element.getAttribute("href") || undefined;
-        const inputType = element.getAttribute("type") || undefined;
-        const inputName = element.getAttribute("name") || undefined;
-        const value = inputType === "password" ? (element.value ? "********" : undefined) : (element.value || undefined);
-
-        const disabled = element.disabled === true || element.hasAttribute("disabled");
-        const checked = element.checked === true || element.hasAttribute("checked");
-        const xpath = computeAbsoluteXPath(element);
-
-        let selector = '[data-element-id="' + elementId + '"]';
-        if (element.id && typeof CSS !== 'undefined' && CSS.escape) {
-          selector = '#' + CSS.escape(element.id);
-        }
-
-        const rect = element.getBoundingClientRect();
-        const isVisible = rect.width > 0 && rect.height > 0 && window.getComputedStyle(element).visibility !== "hidden";
-        const inViewport =
-          rect.top >= 0 && rect.left >= 0 &&
-          rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
-          rect.right <= (window.innerWidth || document.documentElement.clientWidth);
-
-        const attributes = {};
-        if (inputType) attributes.type = inputType;
-        if (inputName) attributes.name = inputName;
-        if (href) attributes.href = href;
-
-        return {
-          id: elementId,
-          tagName,
-          text,
-          value,
-          placeholder,
-          ariaLabel,
-          role,
-          selector,
-          xpath,
-          attributes,
-          isInteractive: true,
-          href,
-          disabled,
-          checked,
-          isVisible,
-          inViewport,
-          rect: {
-            left: Math.round(rect.left),
-            top: Math.round(rect.top),
-            width: Math.round(rect.width),
-            height: Math.round(rect.height),
-          },
-        };
+      this.pendingRequests.set(id, {
+        resolve: (data) => {
+          clearTimeout(timer);
+          resolve(data);
+        },
+        reject: (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
       });
-    })()
-  `;
 
-  const elements = (await page.evaluate(elementsScript)) as DOMElement[];
-  return { elements, screenshotBase64, title, url };
-}
-
-async function getLocatorForTarget(
-  page: Page,
-  targetId?: string | number,
-): Promise<Locator | null> {
-  if (!targetId) return null;
-  const idStr = String(targetId).trim();
-  if (idStr.startsWith("xpath=")) return page.locator(idStr).first();
-  if (idStr.startsWith("/") || idStr.startsWith("./"))
-    return page.locator(`xpath=${idStr}`).first();
-  if (idStr.startsWith("#") || idStr.startsWith(".") || idStr.startsWith("["))
-    return page.locator(idStr).first();
-
-  const elementSelector = `[data-element-id="${idStr}"]`;
-  const elementLocator = page.locator(elementSelector).first();
-  if ((await elementLocator.count()) > 0) return elementLocator;
-
-  const idLocator = page.locator(`#${idStr}`).first();
-  if ((await idLocator.count()) > 0) return idLocator;
-
-  return page.locator(`${elementSelector}, #${idStr}`).first();
-}
-
-async function isElementDisabled(locator: Locator): Promise<boolean> {
-  try {
-    if (await locator.isDisabled({ timeout: 1000 })) return true;
-    const ariaDisabled = await locator
-      .getAttribute("aria-disabled", { timeout: 1000 })
-      .catch(() => null);
-    if (ariaDisabled === "true") return true;
-  } catch {
-    // Ignore resolution errors
-  }
-  return false;
-}
-
-async function executeActionOnPage(
-  page: Page,
-  actResult: ActResult,
-): Promise<boolean> {
-  const {
-    action,
-    targetElementId,
-    text,
-    key,
-    direction,
-    value,
-    toElementId,
-    url,
-  } = actResult;
-  console.log(
-    `[Executor] Performing action: ${action} | Target: ${targetElementId || "N/A"}`,
-  );
-
-  if (action === "done") {
-    return true;
-  }
-
-  if (action === "nav" && url) {
-    await page.goto(url, { waitUntil: "domcontentloaded" });
-    await waitForDomNetworkQuiet(page);
-    return false;
-  }
-
-  const locator = await getLocatorForTarget(page, targetElementId);
-
-  switch (action) {
-    case "click":
-      if (!locator)
-        throw new Error(`No locator found for target: ${targetElementId}`);
-      if (await isElementDisabled(locator)) {
-        throw new Error(
-          `Cannot perform click: element '${targetElementId}' is disabled.`,
-        );
-      }
-      await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
-      await locator.click({ timeout: 5000 });
-      break;
-
-    case "doubleClick":
-      if (!locator)
-        throw new Error(`No locator found for target: ${targetElementId}`);
-      if (await isElementDisabled(locator)) {
-        throw new Error(
-          `Cannot perform doubleClick: element '${targetElementId}' is disabled.`,
-        );
-      }
-      await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
-      await locator.dblclick({ timeout: 5000 });
-      break;
-
-    case "type":
-      if (!locator)
-        throw new Error(`No locator found for target: ${targetElementId}`);
-      await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
-      await locator.fill("", { timeout: 3000 }).catch(() => {});
-      await locator.fill(text || "", { timeout: 5000 });
-      break;
-
-    case "press":
-      const keyStr = key || "Enter";
-      if (locator && (await locator.count()) > 0) {
-        if (await isElementDisabled(locator)) {
-          throw new Error(
-            `Cannot perform press: element '${targetElementId}' is disabled.`,
-          );
-        }
-        await locator.press(keyStr, { timeout: 5000 });
+      if (this.ws.readyState === WebSocket.OPEN) {
+        this.ws.send(JSON.stringify(msg));
       } else {
-        await page.keyboard.press(keyStr);
+        clearTimeout(timer);
+        this.pendingRequests.delete(id);
+        reject(new Error("Client WebSocket is not open"));
       }
-      break;
-
-    case "scroll":
-      if (direction === "top") await page.evaluate(() => window.scrollTo(0, 0));
-      else if (direction === "bottom")
-        await page.evaluate(() =>
-          window.scrollTo(0, document.body.scrollHeight),
-        );
-      else if (direction === "up")
-        await page.evaluate(() => window.scrollBy(0, -500));
-      else if (direction === "left")
-        await page.evaluate(() => window.scrollBy(-300, 0));
-      else if (direction === "right")
-        await page.evaluate(() => window.scrollBy(300, 0));
-      else await page.evaluate(() => window.scrollBy(0, 500));
-      break;
-
-    case "hover":
-      if (!locator)
-        throw new Error(`No locator found for target: ${targetElementId}`);
-      await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
-      await locator.hover({ timeout: 5000 });
-      break;
-
-    case "select":
-      if (!locator)
-        throw new Error(`No locator found for target: ${targetElementId}`);
-      if (await isElementDisabled(locator)) {
-        throw new Error(
-          `Cannot perform select: element '${targetElementId}' is disabled.`,
-        );
-      }
-      await locator.selectOption(value || text || "", { timeout: 5000 });
-      break;
-
-    case "dragAndDrop":
-      if (!locator)
-        throw new Error(`No locator found for target: ${targetElementId}`);
-      const targetLocator = await getLocatorForTarget(page, toElementId);
-      if (!targetLocator)
-        throw new Error(`No locator found for drop target: ${toElementId}`);
-      await locator.dragTo(targetLocator, { timeout: 5000 });
-      break;
-
-    default:
-      console.warn(`[Executor] Unhandled action type: ${action}`);
+    });
   }
-
-  await waitForDomNetworkQuiet(page);
-  return false;
 }
 
 /* ==========================================================================
-   Prompt Builders and Formatting
+   Helper Functions
    ========================================================================== */
 
-function formatDOMState(dom?: DOMElement[]): string {
-  if (!dom || dom.length === 0) return "No DOM content provided.";
-  return dom
-    .map((el, index) => {
-      const idStr =
-        el.id !== undefined ? `[ID: ${el.id}]` : `[Index: ${index}]`;
-      const tagStr = el.tagName ? `<${el.tagName.toLowerCase()}>` : "";
-      const roleStr = el.role ? `role="${el.role}"` : "";
-      const textStr = el.text ? `text="${el.text.trim()}"` : "";
-      const valStr = el.value ? `value="${el.value}"` : "";
-      const placeholderStr = el.placeholder
-        ? `placeholder="${el.placeholder}"`
-        : "";
-      const ariaStr = el.ariaLabel ? `aria-label="${el.ariaLabel}"` : "";
-      const hrefStr = el.href ? `href="${el.href}"` : "";
-      const disabledStr = el.disabled ? `disabled="true"` : "";
-      const checkedStr = el.checked ? `checked="true"` : "";
-      const xpathStr = el.xpath ? `xpath="${el.xpath}"` : "";
+function formatDOMState(elements: DOMElement[]): string {
+  return elements
+    .map((el) => {
+      const parts = [`<${el.tagName || "element"}`];
+      if (el.id !== undefined) parts.push(`id="${el.id}"`);
+      if (el.role) parts.push(`role="${el.role}"`);
+      if (el.placeholder) parts.push(`placeholder="${el.placeholder}"`);
+      if (el.ariaLabel) parts.push(`aria-label="${el.ariaLabel}"`);
+      if (el.href) parts.push(`href="${el.href}"`);
+      if (el.disabled) parts.push(`disabled`);
+      if (el.checked) parts.push(`checked`);
 
-      const attributes = [
-        tagStr,
-        roleStr,
-        textStr,
-        valStr,
-        placeholderStr,
-        ariaStr,
-        hrefStr,
-        disabledStr,
-        checkedStr,
-        xpathStr,
-      ]
-        .filter(Boolean)
-        .join(" ");
+      if (el.attributes) {
+        for (const [k, v] of Object.entries(el.attributes)) {
+          if (!["id", "role", "placeholder", "aria-label", "href"].includes(k)) {
+            parts.push(`${k}="${v}"`);
+          }
+        }
+      }
 
-      return `${idStr} ${attributes}`.trim();
+      parts.push(">");
+      if (el.text) parts.push(el.text);
+      if (el.value) parts.push(`[value: ${el.value}]`);
+      parts.push(`</${el.tagName || "element"}>`);
+      return parts.join(" ");
     })
     .join("\n");
 }
@@ -461,7 +212,7 @@ function substituteVariables(
     if (rawVal === undefined || rawVal === null) continue;
     const value = String(rawVal);
     result = result
-      .replaceAll(`\$\{${key}\}`, value)
+      .replaceAll(`\${${key}}`, value)
       .replaceAll(`{${key}}`, value)
       .replaceAll(`%${key}%`, value);
   }
@@ -596,14 +347,18 @@ export interface ExecutorOptions {
 }
 
 export class Executor {
-  private cdpUrl: string;
+  private session: ClientWebSocketSession;
   private ai: GoogleGenAI;
   private model: string;
   private cache: ExecutorCache;
   private sendScreenshot: boolean;
 
-  constructor(cdpUrl: string, options?: ExecutorOptions) {
-    this.cdpUrl = cdpUrl;
+  constructor(client: WebSocket | ClientWebSocketSession, options?: ExecutorOptions) {
+    if (client instanceof ClientWebSocketSession) {
+      this.session = client;
+    } else {
+      this.session = new ClientWebSocketSession(client);
+    }
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
@@ -625,7 +380,6 @@ export class Executor {
 
   public async runWithContext(
     testCase: TestCase,
-    context: any,
     onProgress?: (progress: {
       stepIndex: number;
       totalSteps: number;
@@ -636,141 +390,18 @@ export class Executor {
     options?: ExecutorOptions,
   ): Promise<TestCaseExecutionReport> {
     const shouldSendScreenshot = options?.sendScreenshot ?? this.sendScreenshot;
-    const page = await context.newPage();
-    await page.setViewportSize({ width: 1280, height: 800 });
+    const sessionId = `sess_${testCase.id || "tc"}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+    // Initialize page on client under an isolated browser context
+    await this.session.sendRequest("INIT_PAGE", {
+      sessionId,
+      viewport: { width: 1280, height: 800 },
+    });
 
     const startTime = Date.now();
     const stepReports: StepExecutionReport[] = [];
     let overallSuccess = true;
     let totalTokensUsed = 0;
-
-    const networkReports: any[] = [];
-    const logReports: any[] = [];
-
-    const getFormattedTime = () => {
-      const elapsed = Date.now() - startTime;
-      const sec = Math.floor(elapsed / 1000);
-      const ms = elapsed % 1000;
-      return `${String(sec).padStart(2, "0")}:${String(ms).padStart(3, "0")}`;
-    };
-
-    logReports.push({
-      id: `l-${logReports.length + 1}`,
-      timestamp: getFormattedTime(),
-      level: "info",
-      message: `Starting execution for test case "${testCase.title}" (${testCase.id})`,
-    });
-
-    page.on("response", async (res: any) => {
-      try {
-        const req = res.request();
-        const urlStr = req.url();
-        if (urlStr.startsWith("http://") || urlStr.startsWith("https://")) {
-          const timing = req.timing();
-          const durationMs =
-            timing && timing.responseEnd > 0
-              ? Math.round(timing.responseEnd)
-              : 0;
-          const timeStr = durationMs > 0 ? `${durationMs}ms` : "—";
-
-          const displayUrl = urlStr;
-
-          let reqHeaders: Record<string, string> = {};
-          try {
-            reqHeaders = req.headers() || {};
-          } catch (_) {}
-
-          let reqBody: string | null = null;
-          try {
-            const rawReqBody = req.postData() || null;
-            if (rawReqBody) {
-              reqBody = rawReqBody
-                .replace(/\u0000/g, "")
-                .replace(/\\u0000/g, "");
-            }
-          } catch (_) {}
-
-          let resHeaders: Record<string, string> = {};
-          try {
-            resHeaders = res.headers() || {};
-          } catch (_) {}
-
-          let resBody: string | null = null;
-          try {
-            const contentType = (
-              resHeaders["content-type"] || ""
-            ).toLowerCase();
-            const isBinary =
-              contentType.includes("image/") ||
-              contentType.includes("font/") ||
-              contentType.includes("video/") ||
-              contentType.includes("audio/") ||
-              contentType.includes("application/octet-stream") ||
-              contentType.includes("application/zip") ||
-              contentType.includes("application/pdf") ||
-              contentType.includes("application/gzip") ||
-              contentType.includes("application/protobuf") ||
-              contentType.includes("application/x-protobuf");
-
-            if (isBinary) {
-              resBody = "[Binary Data]";
-            } else {
-              const buffer = await res.body().catch(() => null);
-              if (buffer) {
-                const maxLen = 50000;
-                const rawStr =
-                  buffer.length <= maxLen
-                    ? buffer.toString("utf-8")
-                    : buffer.slice(0, maxLen).toString("utf-8") +
-                      "\n... [truncated]";
-                resBody = rawStr.replace(/\u0000/g, "").replace(/\\u0000/g, "");
-              }
-            }
-          } catch (_) {}
-
-          networkReports.push({
-            id: `n-${networkReports.length + 1}`,
-            method: req.method(),
-            url: displayUrl,
-            status: res.status(),
-            time: timeStr,
-            requestHeaders: reqHeaders,
-            requestBody: reqBody,
-            responseHeaders: resHeaders,
-            responseBody: resBody,
-          });
-        }
-      } catch (_) {}
-    });
-
-    page.on("console", (msg: any) => {
-      try {
-        const type = msg.type();
-        const level =
-          type === "error"
-            ? "error"
-            : type === "warning" || type === "warn"
-              ? "warn"
-              : "info";
-        logReports.push({
-          id: `l-${logReports.length + 1}`,
-          timestamp: getFormattedTime(),
-          level,
-          message: msg.text(),
-        });
-      } catch (_) {}
-    });
-
-    page.on("pageerror", (err: any) => {
-      try {
-        logReports.push({
-          id: `l-${logReports.length + 1}`,
-          timestamp: getFormattedTime(),
-          level: "error",
-          message: `Uncaught Exception: ${err.message || String(err)}`,
-        });
-      } catch (_) {}
-    });
 
     try {
       const normalizedSteps = (testCase.steps || []).map(
@@ -848,23 +479,33 @@ export class Executor {
               prodUrl,
               "prod",
             );
-            console.log(`[Executor] Navigating browser page to ${targetUrl}`);
-            await page.goto(targetUrl, {
-              waitUntil: "domcontentloaded",
-              timeout: 30000,
+            console.log(`[Executor] Instructing client to navigate to ${targetUrl}`);
+
+            const navRes = await this.session.sendRequest<ClientRpcMessage>("NAVIGATE", {
+              sessionId,
+              url: targetUrl,
+              timeoutMs: 30000,
             });
-            await waitForDomNetworkQuiet(page);
+
+            if (!navRes.success) {
+              throw new Error(navRes.error || `Failed to navigate to ${targetUrl}`);
+            }
+
             stepReport.explanation = `Successfully navigated to ${targetUrl}`;
             stepReport.success = true;
           } else if (step.type === "act") {
-            const state = await extractPageState(page);
-            stepReport.screenshotBase64 = state.screenshotBase64;
+            const stateRes = await this.session.sendRequest<ClientRpcMessage>("GET_PAGE_STATE", {
+              sessionId,
+              includeScreenshot: shouldSendScreenshot,
+            });
 
+            stepReport.screenshotBase64 = stateRes.screenshotBase64;
+            const elements = stateRes.elements || [];
             const instruction = stepDescription;
             const cacheKey = this.cache.generateKey(
               instruction,
-              state.elements,
-              state.url,
+              elements,
+              stateRes.url,
             );
             const cachedActResult = this.cache.get<ActResult>(cacheKey);
 
@@ -878,10 +519,17 @@ export class Executor {
               stepReport.cacheKey = cacheKey;
               stepReport.tokensUsed = 0;
 
-              await executeActionOnPage(page, cachedActResult);
+              const actRes = await this.session.sendRequest<ClientRpcMessage>("EXECUTE_ACTION", {
+                sessionId,
+                actResult: cachedActResult,
+              });
+
+              if (!actRes.success) {
+                throw new Error(actRes.error || "Action execution failed on client");
+              }
               stepReport.success = true;
             } else {
-              const domStr = formatDOMState(state.elements);
+              const domStr = formatDOMState(elements);
 
               const systemPrompt = `You are Zeni Executor. Analyze the DOM and choose the single best action to fulfill the instruction.
 Valid actions: 'click', 'doubleClick', 'type', 'press', 'scroll', 'hover', 'select', 'dragAndDrop', 'nav', 'done'.
@@ -892,11 +540,11 @@ If the goal is fully accomplished, set action to 'done'.`;
               const actParts: any[] = [
                 { text: `${systemPrompt}\n\n${userText}` },
               ];
-              if (shouldSendScreenshot && state.screenshotBase64) {
+              if (shouldSendScreenshot && stateRes.screenshotBase64) {
                 actParts.push({
                   inlineData: {
                     mimeType: "image/png",
-                    data: state.screenshotBase64,
+                    data: stateRes.screenshotBase64,
                   },
                 });
               }
@@ -934,7 +582,15 @@ If the goal is fully accomplished, set action to 'done'.`;
               console.log(
                 `[Executor] Predicted action: ${actResult.action} | Reasoning: ${actResult.reasoning}`,
               );
-              await executeActionOnPage(page, actResult);
+
+              const actRes = await this.session.sendRequest<ClientRpcMessage>("EXECUTE_ACTION", {
+                sessionId,
+                actResult,
+              });
+
+              if (!actRes.success) {
+                throw new Error(actRes.error || "Action execution failed on client");
+              }
               stepReport.success = true;
             }
           } else if (step.type === "validate") {
@@ -947,17 +603,21 @@ If the goal is fully accomplished, set action to 'done'.`;
                 console.log(
                   `[Executor] Validation attempt ${attempt} waiting for page to settle...`,
                 );
-                await page.waitForTimeout(2000);
+                await this.session.sendRequest("WAIT", { sessionId, ms: 2000 });
               }
 
-              const state = await extractPageState(page);
-              stepReport.screenshotBase64 = state.screenshotBase64;
+              const stateRes = await this.session.sendRequest<ClientRpcMessage>("GET_PAGE_STATE", {
+                sessionId,
+                includeScreenshot: shouldSendScreenshot,
+              });
+              stepReport.screenshotBase64 = stateRes.screenshotBase64;
 
+              const elements = stateRes.elements || [];
               const instruction = stepDescription;
               const cacheKey = this.cache.generateKey(
                 instruction,
-                state.elements,
-                state.url,
+                elements,
+                stateRes.url,
                 "validate",
               );
               const cachedValResult = this.cache.get<StepResult>(cacheKey);
@@ -982,7 +642,7 @@ If the goal is fully accomplished, set action to 'done'.`;
                   break;
                 }
               } else {
-                const domStr = formatDOMState(state.elements);
+                const domStr = formatDOMState(elements);
 
                 const systemPrompt = `You are Zeni Executor. Verify the validation statement against the current DOM.
 Set success to true if the condition is completely met.
@@ -993,11 +653,11 @@ Set pageStillLoading to true if it failed ONLY because the page is still loading
                 const valParts: any[] = [
                   { text: `${systemPrompt}\n\n${userText}` },
                 ];
-                if (shouldSendScreenshot && state.screenshotBase64) {
+                if (shouldSendScreenshot && stateRes.screenshotBase64) {
                   valParts.push({
                     inlineData: {
                       mimeType: "image/png",
-                      data: state.screenshotBase64,
+                      data: stateRes.screenshotBase64,
                     },
                   });
                 }
@@ -1030,7 +690,6 @@ Set pageStillLoading to true if it failed ONLY because the page is still loading
                 stepReport.cachedResponse = false;
 
                 this.cache.set(cacheKey, valResult);
-
                 lastResult = valResult;
 
                 if (valResult.success) {
@@ -1058,13 +717,15 @@ Set pageStillLoading to true if it failed ONLY because the page is still loading
           stepReport.explanation = stepErr.message || String(stepErr);
         }
 
-        // Always capture screenshot after step execution
+        // Capture screenshot after step
         try {
-          const screenshotBuffer = await page.screenshot({
-            type: "png",
+          const shotRes = await this.session.sendRequest<ClientRpcMessage>("TAKE_SCREENSHOT", {
+            sessionId,
             fullPage: false,
           });
-          stepReport.screenshotBase64 = screenshotBuffer.toString("base64");
+          if (shotRes.screenshotBase64) {
+            stepReport.screenshotBase64 = shotRes.screenshotBase64;
+          }
         } catch (imgErr) {
           console.warn(
             `[Executor] Failed to capture screenshot after step ${step.index}:`,
@@ -1080,41 +741,42 @@ Set pageStillLoading to true if it failed ONLY because the page is still loading
             stepIndex: step.index,
             totalSteps: testCase.steps.length,
             stepType: step.type,
-            description: stepReport.description,
+            description: maskedStepDescription,
             status: stepReport.success ? "passed" : "failed",
           });
         }
 
         if (!stepReport.success) {
-          overallSuccess = false;
-          console.warn(
-            `[Executor] Step ${step.index} failed. Aborting further steps.`,
+          console.log(
+            `[Executor] Step ${step.index} failed. Aborting remaining steps for test case ${testCase.id}.`,
           );
+          overallSuccess = false;
           break;
         }
       }
-      console.log(
-        `[Server Log] Test case "${testCase.title}" (${testCase.id}) completed in ${Date.now() - startTime} ms. LLM Tokens Used: ${totalTokensUsed}`,
-      );
     } catch (err: any) {
-      console.error("[Executor] Execution error:", err);
+      console.error(
+        `[Executor] Execution failed for test case ${testCase.id}:`,
+        err,
+      );
       overallSuccess = false;
-    } finally {
-      await page.close().catch(() => {});
     }
 
+    // Retrieve network and console reports from client
+    let networkReports: NetworkReportItem[] = [];
+    let logReports: LogReportItem[] = [];
+    try {
+      const reportsRes = await this.session.sendRequest<ClientRpcMessage>("GET_SESSION_REPORTS", {
+        sessionId,
+      });
+      if (reportsRes.networkReports) networkReports = reportsRes.networkReports;
+      if (reportsRes.logReports) logReports = reportsRes.logReports;
+    } catch (_) {}
+
+    // Close page on client
+    await this.session.sendRequest("CLOSE_PAGE", { sessionId }).catch(() => {});
+
     const totalExecutionTimeMs = Date.now() - startTime;
-    const info = {
-      specFile: testCase.id ? `${testCase.id}.yaml` : "test.yaml",
-      browser: "Chromium 124.0",
-      duration: `${(totalExecutionTimeMs / 1000).toFixed(1)}s`,
-      url:
-        testCase.prodURL ||
-        testCase.prodUrl ||
-        testCase.localURL ||
-        testCase.localUrl ||
-        "—",
-    };
 
     return {
       testCaseId: testCase.id,
@@ -1125,11 +787,21 @@ Set pageStillLoading to true if it failed ONLY because the page is still loading
         testCase.prodUrl ||
         testCase.localURL ||
         testCase.localUrl ||
-        "",
+        "/",
       stepReports,
       networkReports,
       logReports,
-      info,
+      info: {
+        specFile: (testCase as any).fileName || `${testCase.id}.yaml`,
+        browser: "chromium (client playwright)",
+        duration: `${(totalExecutionTimeMs / 1000).toFixed(1)}s`,
+        url:
+          testCase.prodURL ||
+          testCase.prodUrl ||
+          testCase.localURL ||
+          testCase.localUrl ||
+          "/",
+      },
       totalExecutionTimeMs,
       totalTokensUsed,
     };
@@ -1144,15 +816,8 @@ Set pageStillLoading to true if it failed ONLY because the page is still loading
       description: string;
       status: "running" | "passed" | "failed";
     }) => void,
+    options?: ExecutorOptions,
   ): Promise<TestCaseExecutionReport> {
-    console.log(`[Executor] Connecting to client browser at ${this.cdpUrl}`);
-    const browser = await chromium.connectOverCDP(this.cdpUrl);
-    const context = await browser.newContext();
-    try {
-      return await this.runWithContext(testCase, context, onProgress);
-    } finally {
-      await context.close().catch(() => {});
-      await browser.close().catch(() => {});
-    }
+    return await this.runWithContext(testCase, onProgress, options);
   }
 }

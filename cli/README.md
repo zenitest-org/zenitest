@@ -78,7 +78,7 @@ zenitest report 1
 Authenticates the CLI with your Zeni API key. Prompts interactively if omitted.
 
 ### `zenitest client`
-Launches the local Chrome headless browser proxy client and establishes a Chrome DevTools Protocol (CDP) WebSocket tunnel to the Zeni test server.
+Launches the local Playwright web automation test executor and connects to the Zeni API server over WebSocket RPC.
 
 ### `zenitest run [options]`
 Executes YAML test cases.

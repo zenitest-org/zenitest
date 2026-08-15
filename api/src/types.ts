@@ -195,3 +195,54 @@ export interface MobileExecutionOptions {
   geminiApiKey?: string;
 }
 
+/* ==================== WebSocket Client-Server RPC Protocol ==================== */
+
+export type ServerRpcMessageType =
+  | 'INIT_PAGE'
+  | 'NAVIGATE'
+  | 'GET_PAGE_STATE'
+  | 'EXECUTE_ACTION'
+  | 'TAKE_SCREENSHOT'
+  | 'WAIT'
+  | 'GET_SESSION_REPORTS'
+  | 'CLOSE_PAGE'
+  | 'CLOSE_BROWSER';
+
+export interface ServerRpcMessage {
+  type: ServerRpcMessageType;
+  id: string;
+  sessionId?: string;
+  url?: string;
+  timeoutMs?: number;
+  includeScreenshot?: boolean;
+  actResult?: ActResult;
+  fullPage?: boolean;
+  ms?: number;
+  viewport?: { width: number; height: number };
+}
+
+export type ClientRpcMessageType =
+  | 'CLIENT_READY'
+  | 'RPC_RESPONSE'
+  | 'PAGE_STATE_RESPONSE'
+  | 'ACTION_RESPONSE'
+  | 'SCREENSHOT_RESPONSE'
+  | 'SESSION_REPORTS_RESPONSE';
+
+export interface ClientRpcMessage {
+  type: ClientRpcMessageType;
+  id: string;
+  sessionId?: string;
+  success: boolean;
+  error?: string;
+  data?: any;
+  elements?: DOMElement[];
+  screenshotBase64?: string;
+  title?: string;
+  url?: string;
+  executionTimeMs?: number;
+  networkReports?: NetworkReportItem[];
+  logReports?: LogReportItem[];
+}
+
+
