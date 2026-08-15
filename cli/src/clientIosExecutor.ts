@@ -386,6 +386,7 @@ export class ClientIosExecutor {
       "appium:noReset": true,
       "appium:fullReset": false,
       "appium:enforceAppInstall": false,
+      "appium:shouldTerminateApp": true,
       "appium:deviceName": targetDevice.name,
     };
 
@@ -630,6 +631,18 @@ export class ClientIosExecutor {
   private async closeSession(sessionId: string): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (session) {
+      const targetApp = this.resolveTargetAppPath();
+      const bundleId = this.bundleId || extractBundleId(targetApp);
+      if (bundleId) {
+        try {
+          await session.driver.terminateApp(bundleId).catch(() => {});
+        } catch (_) {}
+        try {
+          execSync(`xcrun simctl terminate booted ${bundleId}`, {
+            stdio: ["ignore", "ignore", "ignore"],
+          });
+        } catch (_) {}
+      }
       await session.driver.deleteSession().catch(() => {});
       this.sessions.delete(sessionId);
     }
@@ -637,7 +650,19 @@ export class ClientIosExecutor {
 
   public async stop(): Promise<void> {
     this.isStopped = true;
+    const targetApp = this.resolveTargetAppPath();
+    const bundleId = this.bundleId || extractBundleId(targetApp);
+    if (bundleId) {
+      try {
+        execSync(`xcrun simctl terminate booted ${bundleId}`, {
+          stdio: ["ignore", "ignore", "ignore"],
+        });
+      } catch (_) {}
+    }
     for (const [id, session] of this.sessions.entries()) {
+      if (bundleId) {
+        await session.driver.terminateApp(bundleId).catch(() => {});
+      }
       await session.driver.deleteSession().catch(() => {});
     }
     this.sessions.clear();
@@ -652,6 +677,15 @@ export class ClientIosExecutor {
   }
 
   private cleanup(): void {
+    const targetApp = this.resolveTargetAppPath();
+    const bundleId = this.bundleId || extractBundleId(targetApp);
+    if (bundleId) {
+      try {
+        execSync(`xcrun simctl terminate booted ${bundleId}`, {
+          stdio: ["ignore", "ignore", "ignore"],
+        });
+      } catch (_) {}
+    }
     for (const [, session] of this.sessions) {
       session.driver.deleteSession().catch(() => {});
     }
