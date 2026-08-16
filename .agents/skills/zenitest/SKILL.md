@@ -103,6 +103,7 @@ zenitest run [options]
 **Options:**
 - `--dir, -d <directory>`: Folder containing `.yaml` test files (default: `zenitests`).
 - `--platform, -t <target>`: Filter test platform target: `web`, `ios`, `android` (comma-separated list).
+- `--browser <browser>`: Web browser: `chromium`, `chrome`, `firefox`, `safari` (default: config or `chromium`).
 - `--bundle, -b <path>`: Path to built mobile app binary file (`.ipa` or `.apk`).
 - `--parallel, -p <count>`: Number of web test cases to run concurrently (default: `5`).
 - `--help, -h`: Display CLI help screen.

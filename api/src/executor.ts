@@ -126,7 +126,10 @@ export class ClientWebSocketSession {
           }
         }
       } catch (err) {
-        console.warn("[ClientWebSocketSession] Failed to parse client response:", err);
+        console.warn(
+          "[ClientWebSocketSession] Failed to parse client response:",
+          err,
+        );
       }
     });
   }
@@ -143,7 +146,9 @@ export class ClientWebSocketSession {
       const timer = setTimeout(() => {
         if (this.pendingRequests.has(id)) {
           this.pendingRequests.delete(id);
-          reject(new Error(`RPC request '${type}' timed out after ${timeoutMs}ms`));
+          reject(
+            new Error(`RPC request '${type}' timed out after ${timeoutMs}ms`),
+          );
         }
       }, timeoutMs);
 
@@ -187,7 +192,9 @@ function formatDOMState(elements: DOMElement[]): string {
 
       if (el.attributes) {
         for (const [k, v] of Object.entries(el.attributes)) {
-          if (!["id", "role", "placeholder", "aria-label", "href"].includes(k)) {
+          if (
+            !["id", "role", "placeholder", "aria-label", "href"].includes(k)
+          ) {
             parts.push(`${k}="${v}"`);
           }
         }
@@ -347,6 +354,18 @@ export interface ExecutorOptions {
   localUrl?: string;
   prodUrl?: string;
   env?: "prod" | "local" | string;
+  browser?: string;
+}
+
+export function formatBrowserName(browser?: string): string {
+  if (!browser) return "Chromium";
+  const b = browser.toLowerCase().trim();
+  if (b === "chrome") return "Chrome";
+  if (b === "firefox") return "Firefox";
+  if (b === "safari" || b === "webkit") return "Safari";
+  if (b === "edge" || b === "msedge") return "Edge";
+  if (b === "chromium") return "Chromium";
+  return browser.charAt(0).toUpperCase() + browser.slice(1);
 }
 
 export class Executor {
@@ -356,7 +375,10 @@ export class Executor {
   private cache: ExecutorCache;
   private sendScreenshot: boolean;
 
-  constructor(client: WebSocket | ClientWebSocketSession, options?: ExecutorOptions) {
+  constructor(
+    client: WebSocket | ClientWebSocketSession,
+    options?: ExecutorOptions,
+  ) {
     if (client instanceof ClientWebSocketSession) {
       this.session = client;
     } else {
@@ -474,34 +496,48 @@ export class Executor {
         try {
           if (step.type === "navigate") {
             const navPath = step.url || step.description || "/";
-            const localUrl = testCase.localUrl || testCase.localURL || options?.localUrl;
-            const prodUrl = testCase.prodUrl || testCase.prodURL || options?.prodUrl;
-            const targetEnv = (options?.env === "local" ? "local" : "prod") as "prod" | "local";
+            const localUrl =
+              testCase.localUrl || testCase.localURL || options?.localUrl;
+            const prodUrl =
+              testCase.prodUrl || testCase.prodURL || options?.prodUrl;
+            const targetEnv = (options?.env === "local" ? "local" : "prod") as
+              | "prod"
+              | "local";
             const targetUrl = resolveFullURL(
               navPath,
               localUrl,
               prodUrl,
               targetEnv,
             );
-            console.log(`[Executor] Instructing client to navigate to ${targetUrl}`);
+            console.log(
+              `[Executor] Instructing client to navigate to ${targetUrl}`,
+            );
 
-            const navRes = await this.session.sendRequest<ClientRpcMessage>("NAVIGATE", {
-              sessionId,
-              url: targetUrl,
-              timeoutMs: 30000,
-            });
+            const navRes = await this.session.sendRequest<ClientRpcMessage>(
+              "NAVIGATE",
+              {
+                sessionId,
+                url: targetUrl,
+                timeoutMs: 30000,
+              },
+            );
 
             if (!navRes.success) {
-              throw new Error(navRes.error || `Failed to navigate to ${targetUrl}`);
+              throw new Error(
+                navRes.error || `Failed to navigate to ${targetUrl}`,
+              );
             }
 
             stepReport.explanation = `Successfully navigated to ${targetUrl}`;
             stepReport.success = true;
           } else if (step.type === "act") {
-            const stateRes = await this.session.sendRequest<ClientRpcMessage>("GET_PAGE_STATE", {
-              sessionId,
-              includeScreenshot: shouldSendScreenshot,
-            });
+            const stateRes = await this.session.sendRequest<ClientRpcMessage>(
+              "GET_PAGE_STATE",
+              {
+                sessionId,
+                includeScreenshot: shouldSendScreenshot,
+              },
+            );
 
             stepReport.screenshotBase64 = stateRes.screenshotBase64;
             const elements = stateRes.elements || [];
@@ -523,13 +559,18 @@ export class Executor {
               stepReport.cacheKey = cacheKey;
               stepReport.tokensUsed = 0;
 
-              const actRes = await this.session.sendRequest<ClientRpcMessage>("EXECUTE_ACTION", {
-                sessionId,
-                actResult: cachedActResult,
-              });
+              const actRes = await this.session.sendRequest<ClientRpcMessage>(
+                "EXECUTE_ACTION",
+                {
+                  sessionId,
+                  actResult: cachedActResult,
+                },
+              );
 
               if (!actRes.success) {
-                throw new Error(actRes.error || "Action execution failed on client");
+                throw new Error(
+                  actRes.error || "Action execution failed on client",
+                );
               }
               stepReport.success = true;
             } else {
@@ -587,13 +628,18 @@ If the goal is fully accomplished, set action to 'done'.`;
                 `[Executor] Predicted action: ${actResult.action} | Reasoning: ${actResult.reasoning}`,
               );
 
-              const actRes = await this.session.sendRequest<ClientRpcMessage>("EXECUTE_ACTION", {
-                sessionId,
-                actResult,
-              });
+              const actRes = await this.session.sendRequest<ClientRpcMessage>(
+                "EXECUTE_ACTION",
+                {
+                  sessionId,
+                  actResult,
+                },
+              );
 
               if (!actRes.success) {
-                throw new Error(actRes.error || "Action execution failed on client");
+                throw new Error(
+                  actRes.error || "Action execution failed on client",
+                );
               }
               stepReport.success = true;
             }
@@ -610,10 +656,13 @@ If the goal is fully accomplished, set action to 'done'.`;
                 await this.session.sendRequest("WAIT", { sessionId, ms: 2000 });
               }
 
-              const stateRes = await this.session.sendRequest<ClientRpcMessage>("GET_PAGE_STATE", {
-                sessionId,
-                includeScreenshot: shouldSendScreenshot,
-              });
+              const stateRes = await this.session.sendRequest<ClientRpcMessage>(
+                "GET_PAGE_STATE",
+                {
+                  sessionId,
+                  includeScreenshot: shouldSendScreenshot,
+                },
+              );
               stepReport.screenshotBase64 = stateRes.screenshotBase64;
 
               const elements = stateRes.elements || [];
@@ -723,10 +772,13 @@ Set pageStillLoading to true if it failed ONLY because the page is still loading
 
         // Capture screenshot after step
         try {
-          const shotRes = await this.session.sendRequest<ClientRpcMessage>("TAKE_SCREENSHOT", {
-            sessionId,
-            fullPage: false,
-          });
+          const shotRes = await this.session.sendRequest<ClientRpcMessage>(
+            "TAKE_SCREENSHOT",
+            {
+              sessionId,
+              fullPage: false,
+            },
+          );
           if (shotRes.screenshotBase64) {
             stepReport.screenshotBase64 = shotRes.screenshotBase64;
           }
@@ -770,9 +822,12 @@ Set pageStillLoading to true if it failed ONLY because the page is still loading
     let networkReports: NetworkReportItem[] = [];
     let logReports: LogReportItem[] = [];
     try {
-      const reportsRes = await this.session.sendRequest<ClientRpcMessage>("GET_SESSION_REPORTS", {
-        sessionId,
-      });
+      const reportsRes = await this.session.sendRequest<ClientRpcMessage>(
+        "GET_SESSION_REPORTS",
+        {
+          sessionId,
+        },
+      );
       if (reportsRes.networkReports) networkReports = reportsRes.networkReports;
       if (reportsRes.logReports) logReports = reportsRes.logReports;
     } catch (_) {}
@@ -797,7 +852,9 @@ Set pageStillLoading to true if it failed ONLY because the page is still loading
       logReports,
       info: {
         specFile: (testCase as any).fileName || `${testCase.id}.yaml`,
-        browser: "chromium (client playwright)",
+        browser: formatBrowserName(
+          (testCase as any).browser || options?.browser || "Chromium",
+        ),
         duration: `${(totalExecutionTimeMs / 1000).toFixed(1)}s`,
         url:
           testCase.prodURL ||

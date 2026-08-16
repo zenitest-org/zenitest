@@ -16,7 +16,7 @@ import {
 } from "../db/supabase";
 
 
-import { Executor } from "../executor";
+import { Executor, formatBrowserName } from "../executor";
 import { MobileExecutor } from "../mobile-executor";
 import { TestCase, TestCaseExecutionReport } from "../types";
 import { authMiddleware, AuthUser } from "../middleware/auth";
@@ -570,6 +570,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           const bodyLocalUrl = (body.localUrl || body.localURL || undefined) as string | undefined;
           const bodyProdUrl = (body.prodUrl || body.prodURL || undefined) as string | undefined;
           const bodyEnv = ((body.env || body.environment || "prod") as string).toLowerCase();
+          const bodyBrowser = (body.browser || body.browserType || undefined) as string | undefined;
 
           const executor = new Executor(clientWs);
 
@@ -615,6 +616,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
                   localUrl: bodyLocalUrl,
                   prodUrl: bodyProdUrl,
                   env: bodyEnv,
+                  browser: (tc as any).browser || bodyBrowser,
                 },
               );
             } catch (err: any) {
@@ -660,7 +662,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
               logReports: report.logReports || [],
               info: report.info || {
                 specFile: tc.id ? `${tc.id}.yaml` : "test.yaml",
-                browser: "Chromium 124.0",
+                browser: formatBrowserName((tc as any).browser || bodyBrowser || "Chromium"),
                 duration: `${(durationMs / 1000).toFixed(1)}s`,
                 url:
                   tc.prodURL ||
@@ -764,6 +766,11 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
       let totalDurationMs = 0;
       let totalTokens = 0;
 
+      const bodyLocalUrl = (body.localUrl || body.localURL || undefined) as string | undefined;
+      const bodyProdUrl = (body.prodUrl || body.prodURL || undefined) as string | undefined;
+      const bodyEnv = ((body.env || body.environment || "prod") as string).toLowerCase();
+      const bodyBrowser = (body.browser || body.browserType || undefined) as string | undefined;
+
       const executor = new Executor(clientWs);
 
       await runConcurrentTasks(testCasesArray, parallel, async (tc) => {
@@ -790,7 +797,12 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         const startTime = Date.now();
         let report: TestCaseExecutionReport;
         try {
-          report = await executor.runWithContext(tc);
+          report = await executor.runWithContext(tc, undefined, {
+            localUrl: bodyLocalUrl,
+            prodUrl: bodyProdUrl,
+            env: bodyEnv,
+            browser: (tc as any).browser || bodyBrowser,
+          });
         } catch (runErr: any) {
           report = {
             testCaseId: tc.id || "unknown",
@@ -840,7 +852,7 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
           logReports: report.logReports || [],
           info: report.info || {
             specFile: tc.id ? `${tc.id}.yaml` : "test.yaml",
-            browser: "Chromium 124.0",
+            browser: formatBrowserName((tc as any).browser || bodyBrowser || "Chromium"),
             duration: `${(durationMs / 1000).toFixed(1)}s`,
             url:
               tc.prodURL ||

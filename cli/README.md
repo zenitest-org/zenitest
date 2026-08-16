@@ -87,6 +87,7 @@ Executes YAML test cases.
 | --- | --- | --- | --- |
 | `--dir <directory>` | `-d` | Directory containing `.yaml` test files | `zenitests` |
 | `--platform <platform>` | `-t` | Target platform: `web`, `ios`, `android` | `all` |
+| `--browser <browser>` | - | Web test browser: `chromium`, `chrome`, `firefox`, `safari` | `chromium` |
 | `--bundle <path>` | `-b` | Path to mobile app binary file (`.apk` or `.ipa`) | - |
 | `--parallel <count>` | `-p` | Number of test cases to execute concurrently | `5` |
 | `--help` | `-h` | Display CLI help message | - |

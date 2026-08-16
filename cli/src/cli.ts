@@ -203,6 +203,7 @@ Options:
   --prod              Run web tests against prodURL
   --bundle, -b        Path to built mobile app binary (.ipa, .app, or .apk)
   --device, -d        Target iOS device name or simulator (defaults to config or iPhone 17)
+  --browser           Browser for web tests: chromium, chrome, firefox, safari (defaults to config or chromium)
   --parallel, -p      Number of test cases to run in parallel (defaults to 5)
   --version, -v       Show CLI version
   --help, -h          Show this help message
@@ -252,7 +253,7 @@ function parseArgs(args: string[]) {
   return options;
 }
 
-const API_BASE_URL = process.env.ZENI_API_URL || "http://localhost:3001";
+const API_BASE_URL = process.env.ZENI_API_URL || "https://api.zenitest.ai";
 const WS_BASE_URL =
   process.env.ZENI_WS_URL ||
   (API_BASE_URL.startsWith("https://")
@@ -1091,6 +1092,7 @@ function loadWebConfig(webDir: string): {
   localURL?: string;
   prodURL?: string;
   parallel?: number;
+  browser?: string;
 } {
   const possiblePaths = [
     join(webDir, "config.yaml"),
@@ -1107,6 +1109,7 @@ function loadWebConfig(webDir: string): {
             localURL: parsed.localURL || parsed.localUrl || parsed.local,
             prodURL: parsed.prodURL || parsed.prodUrl || parsed.prod,
             parallel: parsed.parallel ? Number(parsed.parallel) : undefined,
+            browser: parsed.browser || parsed.browserType,
           };
         }
       } catch {}
@@ -1130,11 +1133,16 @@ function loadWebConfig(webDir: string): {
       options.parallel || options.p || options.concurrency || options.c || webConfig.parallel || 5,
     );
 
+    const browser = String(
+      options.browser || webConfig.browser || "chromium",
+    ).toLowerCase();
+
     const client = new ClientWebExecutor({
       serverUrl: WS_BASE_URL,
       clientId,
       headless: true,
       secrets,
+      browser,
     });
 
     try {
@@ -1170,6 +1178,7 @@ function loadWebConfig(webDir: string): {
           env: targetEnv,
           localURL: webConfig.localURL,
           prodURL: webConfig.prodURL,
+          browser,
         }),
       });
 

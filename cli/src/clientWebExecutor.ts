@@ -1,4 +1,4 @@
-import { chromium, Browser, BrowserContext, Page, Locator } from "playwright";
+import { chromium, firefox, webkit, Browser, BrowserContext, Page, Locator } from "playwright";
 import { WebSocket } from "ws";
 import { execSync } from "child_process";
 
@@ -74,6 +74,7 @@ export interface ClientWebExecutorOptions {
   clientId: string;
   headless?: boolean;
   secrets?: Record<string, string>;
+  browser?: string;
 }
 
 interface SessionState {
@@ -89,6 +90,7 @@ export class ClientWebExecutor {
   private clientId: string;
   private headless: boolean;
   private secrets: Record<string, string>;
+  private browserType: string;
   private ws: WebSocket | null = null;
   private browser: Browser | null = null;
   private sessions = new Map<string, SessionState>();
@@ -99,6 +101,7 @@ export class ClientWebExecutor {
     this.clientId = options.clientId;
     this.headless = options.headless ?? true;
     this.secrets = options.secrets || {};
+    this.browserType = (options.browser || "chromium").toLowerCase().trim();
   }
 
   public async start(): Promise<void> {
@@ -108,26 +111,96 @@ export class ClientWebExecutor {
 
   private async ensurePlaywrightBrowser(): Promise<void> {
     if (this.browser && this.browser.isConnected()) return;
+
+    const b = this.browserType;
     try {
-      this.browser = await chromium.launch({
-        headless: this.headless,
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu",
-        ],
-      });
-    } catch (err: any) {
-      if (err.message && err.message.includes("Executable doesn't exist")) {
+      if (b === "firefox") {
+        this.browser = await firefox.launch({
+          headless: this.headless,
+          args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+          ],
+        });
+      } else if (b === "safari" || b === "webkit") {
+        this.browser = await webkit.launch({
+          headless: this.headless,
+          args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+          ],
+        });
+      } else if (b === "chrome") {
         try {
-          execSync("npx playwright install chromium", { stdio: "inherit" });
+          this.browser = await chromium.launch({
+            channel: "chrome",
+            headless: this.headless,
+            args: [
+              "--no-sandbox",
+              "--disable-setuid-sandbox",
+              "--disable-dev-shm-usage",
+              "--disable-gpu",
+            ],
+          });
+        } catch (chromeErr: any) {
+          console.warn("[ClientWebExecutor] System Chrome channel launch failed, falling back to bundled Chromium:", chromeErr?.message || chromeErr);
           this.browser = await chromium.launch({
             headless: this.headless,
-            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+            args: [
+              "--no-sandbox",
+              "--disable-setuid-sandbox",
+              "--disable-dev-shm-usage",
+              "--disable-gpu",
+            ],
           });
+        }
+      } else {
+        // default: chromium
+        this.browser = await chromium.launch({
+          headless: this.headless,
+          args: [
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-gpu",
+          ],
+        });
+      }
+    } catch (err: any) {
+      if (
+        err.message &&
+        (err.message.includes("Executable doesn't exist") ||
+          err.message.includes("playwright install") ||
+          err.message.includes("Please run the following command"))
+      ) {
+        const installTarget =
+          b === "firefox"
+            ? "firefox"
+            : b === "safari" || b === "webkit"
+              ? "webkit"
+              : "chromium";
+        try {
+          console.log(`[ClientWebExecutor] Installing Playwright ${installTarget}...`);
+          execSync(`npx playwright install ${installTarget}`, { stdio: "inherit" });
+
+          if (b === "firefox") {
+            this.browser = await firefox.launch({
+              headless: this.headless,
+              args: ["--no-sandbox", "--disable-setuid-sandbox"],
+            });
+          } else if (b === "safari" || b === "webkit") {
+            this.browser = await webkit.launch({
+              headless: this.headless,
+              args: ["--no-sandbox", "--disable-setuid-sandbox"],
+            });
+          } else {
+            this.browser = await chromium.launch({
+              headless: this.headless,
+              args: ["--no-sandbox", "--disable-setuid-sandbox"],
+            });
+          }
         } catch (installErr: any) {
-          throw new Error(`Failed to automatically install Playwright Chromium: ${installErr.message}`);
+          throw new Error(`Failed to automatically install Playwright ${installTarget}: ${installErr.message}`);
         }
       } else {
         throw err;
