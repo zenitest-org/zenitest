@@ -7,7 +7,6 @@ import Link from "next/link";
 import {
   CheckIcon,
   ArrowRightIcon,
-  Loader2Icon,
   GlobeIcon,
   SmartphoneIcon,
 } from "lucide-react";
@@ -22,8 +21,16 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 
+interface PlanLimit {
+  max_minutes_web: number;
+  max_minutes_mobile: number;
+  max_parallel_web: number;
+  max_parallel_mobile: number;
+}
+
 interface UserProfileResponse {
   success: boolean;
+  limitations?: Record<string, PlanLimit>;
   user: {
     id: string;
     email: string;
@@ -39,6 +46,8 @@ interface UserProfileResponse {
     max_web_minutes?: number;
     used_mobile_minutes?: number;
     max_mobile_minutes?: number;
+    max_parallel_web?: number;
+    max_parallel_mobile?: number;
   };
 }
 
@@ -94,12 +103,16 @@ export function SettingsView() {
   const apiKey = userData?.api_key || "";
   const displayKey = showApiKey ? apiKey : "••••••••••••••••••••••••••••••••••••••••";
 
+  const limitations = profileData?.limitations;
+  const freeLimit = limitations?.free || { max_minutes_web: 100, max_parallel_web: 1 };
+  const proLimit = limitations?.pro || { max_minutes_web: -1, max_parallel_web: -1 };
+
   const usedWebMins = userData?.used_web_minutes ?? userData?.minutes_used_web ?? 0;
-  const maxWebMins = currentPlan === "pro" ? -1 : (userData?.max_web_minutes ?? 100);
+  const maxWebMins = userData?.max_web_minutes ?? limitations?.[currentPlan]?.max_minutes_web ?? (currentPlan === "pro" ? -1 : 100);
   const webPct = maxWebMins > 0 ? Math.min(100, Math.round((usedWebMins / maxWebMins) * 100)) : 0;
 
   const usedMobileMins = userData?.used_mobile_minutes ?? userData?.minutes_used_mobile ?? 0;
-  const maxMobileMins = currentPlan === "pro" ? -1 : (userData?.max_mobile_minutes ?? 100);
+  const maxMobileMins = userData?.max_mobile_minutes ?? limitations?.[currentPlan]?.max_minutes_mobile ?? (currentPlan === "pro" ? -1 : 100);
   const mobilePct = maxMobileMins > 0 ? Math.min(100, Math.round((usedMobileMins / maxMobileMins) * 100)) : 0;
 
   const handleCopyKey = () => {
@@ -287,8 +300,12 @@ export function SettingsView() {
               </div>
 
               <div className="space-y-1 text-xs text-muted-foreground pt-1">
-                <p>100 test minutes</p>
-                <p>1 parallel execution</p>
+                <p>
+                  {freeLimit.max_minutes_web < 0 ? "Unlimited" : freeLimit.max_minutes_web} test minutes
+                </p>
+                <p>
+                  {freeLimit.max_parallel_web < 0 ? "Unlimited" : freeLimit.max_parallel_web} parallel execution
+                </p>
                 <p>Web + Mobile included</p>
               </div>
             </div>
@@ -330,8 +347,12 @@ export function SettingsView() {
               </div>
 
               <div className="space-y-1 text-xs text-foreground pt-1">
-                <p>Unlimited test minutes</p>
-                <p>Unlimited parallel execution</p>
+                <p>
+                  {proLimit.max_minutes_web < 0 ? "Unlimited" : `${proLimit.max_minutes_web}`} test minutes
+                </p>
+                <p>
+                  {proLimit.max_parallel_web < 0 ? "Unlimited" : `${proLimit.max_parallel_web}`} parallel execution
+                </p>
                 <p>Web + Mobile included</p>
               </div>
             </div>
@@ -401,7 +422,7 @@ export function SettingsView() {
               disabled={isCanceling}
               className="px-3.5 py-1.5 rounded-lg bg-rose-600 text-white hover:bg-rose-700 text-xs font-medium transition-colors cursor-pointer shadow-xs disabled:opacity-50 inline-flex items-center gap-1.5"
             >
-              {isCanceling && <Loader2Icon className="size-3.5 animate-spin" />}
+              {isCanceling && <span className="size-3.5 animate-spin" />}
               <span>Confirm Cancellation</span>
             </button>
           </DialogFooter>

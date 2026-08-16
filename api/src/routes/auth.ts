@@ -5,6 +5,19 @@ import { supabase } from "../db/supabase";
 export function createAuthRouter() {
   const router = new Hono();
 
+  // Public endpoint to retrieve plan limitations
+  router.get("/limitations", async (c) => {
+    try {
+      const { data, error } = await supabase.from("limitation").select("*");
+      if (error) {
+        return c.json({ success: false, error: error.message }, 500);
+      }
+      return c.json({ success: true, data: data || [] });
+    } catch (err: any) {
+      return c.json({ success: false, error: err.message }, 500);
+    }
+  });
+
   // Apply authentication middleware to verify endpoint
   router.use("/verify", authMiddleware);
 
@@ -14,48 +27,65 @@ export function createAuthRouter() {
     let usedWebMinutes = user.minutes_used_web ?? 0;
     let usedMobileMinutes = user.minutes_used_mobile ?? 0;
 
-    // If stored minutes are not populated yet, check public.users table or calculate fallback
+    // Fetch latest user details from users table
     try {
       const { data: dbUser } = await supabase
         .from("users")
-        .select("minutes_used_web, minutes_used_mobile")
+        .select("minutes_used_web, minutes_used_mobile, plan, subscription_status, subscribe_at, expire_at")
         .eq("id", user.id)
         .maybeSingle();
 
       if (dbUser) {
         usedWebMinutes = dbUser.minutes_used_web ?? usedWebMinutes;
         usedMobileMinutes = dbUser.minutes_used_mobile ?? usedMobileMinutes;
+        if (dbUser.plan) user.plan = dbUser.plan;
+        if (dbUser.subscription_status) user.subscription_status = dbUser.subscription_status;
+        if (dbUser.subscribe_at) user.subscribe_at = dbUser.subscribe_at;
+        if (dbUser.expire_at) user.expire_at = dbUser.expire_at;
       }
     } catch (err) {
       console.warn("[Auth Verify] Failed to fetch stored user usage minutes:", err);
     }
 
-    let maxWebMinutes = 100;
-    let maxMobileMinutes = 100;
-    try {
-      const { data: limitRow } = await supabase
-        .from("limitation")
-        .select("max_minutes_web, max_minutes_mobile")
-        .eq("plan", (user.plan || "free").toLowerCase())
-        .maybeSingle();
+    // Fetch all plan limitations from limitation table
+    const limitationsMap: Record<string, {
+      max_minutes_web: number;
+      max_minutes_mobile: number;
+      max_parallel_web: number;
+      max_parallel_mobile: number;
+    }> = {};
 
-      if (limitRow) {
-        maxWebMinutes = limitRow.max_minutes_web;
-        maxMobileMinutes = limitRow.max_minutes_mobile;
-      } else {
-        const plan = (user.plan || "free").toLowerCase();
-        maxWebMinutes = plan === "pro" ? -1 : 100;
-        maxMobileMinutes = plan === "pro" ? -1 : 100;
+    try {
+      const { data: limitRows, error: limitErr } = await supabase
+        .from("limitation")
+        .select("plan, max_minutes_web, max_minutes_mobile, max_parallel_web, max_parallel_mobile");
+
+      if (!limitErr && limitRows) {
+        for (const row of limitRows) {
+          limitationsMap[row.plan.toLowerCase()] = {
+            max_minutes_web: row.max_minutes_web,
+            max_minutes_mobile: row.max_minutes_mobile,
+            max_parallel_web: row.max_parallel_web,
+            max_parallel_mobile: row.max_parallel_mobile,
+          };
+        }
       }
-    } catch {
-      const plan = (user.plan || "free").toLowerCase();
-      maxWebMinutes = plan === "pro" ? -1 : 100;
-      maxMobileMinutes = plan === "pro" ? -1 : 100;
+    } catch (err) {
+      console.warn("[Auth Verify] Failed to fetch limitation table:", err);
     }
+
+    const userPlan = (user.plan || "free").toLowerCase();
+    const activeLimit = limitationsMap[userPlan] || {
+      max_minutes_web: userPlan === "pro" ? -1 : 100,
+      max_minutes_mobile: userPlan === "pro" ? -1 : 100,
+      max_parallel_web: userPlan === "pro" ? -1 : 1,
+      max_parallel_mobile: userPlan === "pro" ? -1 : 1,
+    };
 
     return c.json({
       success: true,
       message: "User verified successfully",
+      limitations: limitationsMap,
       user: {
         id: user.id,
         email: user.email,
@@ -68,14 +98,14 @@ export function createAuthRouter() {
         minutes_used_web: usedWebMinutes,
         minutes_used_mobile: usedMobileMinutes,
         used_web_minutes: usedWebMinutes,
-        max_web_minutes: maxWebMinutes,
+        max_web_minutes: activeLimit.max_minutes_web,
         used_mobile_minutes: usedMobileMinutes,
-        max_mobile_minutes: maxMobileMinutes,
+        max_mobile_minutes: activeLimit.max_minutes_mobile,
+        max_parallel_web: activeLimit.max_parallel_web,
+        max_parallel_mobile: activeLimit.max_parallel_mobile,
       },
     });
   };
-
-
 
   router.get("/verify", handleVerify);
   router.post("/verify", handleVerify);
