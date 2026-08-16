@@ -3,6 +3,7 @@
 import pkg from "../package.json";
 import { ClientWebExecutor } from "./clientWebExecutor";
 import { ClientIosExecutor } from "./clientIosExecutor";
+import { ClientAndroidExecutor } from "./clientAndroidExecutor";
 import {
   readdirSync,
   readFileSync,
@@ -1400,52 +1401,125 @@ function loadIosConfig(iosDir: string): {
     }
   };
 
+function loadAndroidConfig(androidDir: string): {
+  bundlePath?: string;
+  device?: string;
+  parallel?: number;
+} {
+  const possiblePaths = [
+    join(androidDir, "config.yaml"),
+    join(androidDir, "config.yml"),
+    join(androidDir, "config.json"),
+  ];
+  for (const p of possiblePaths) {
+    if (existsSync(p)) {
+      try {
+        const content = readFileSync(p, "utf-8");
+        const parsed = p.endsWith(".json") ? JSON.parse(content) : parseYaml(content);
+        if (parsed && typeof parsed === "object") {
+          return {
+            bundlePath:
+              parsed.bundlePath ||
+              parsed.bundle ||
+              parsed.appPath ||
+              parsed.app ||
+              parsed.apkPath,
+            device: parsed.device || parsed.deviceName,
+            parallel: parsed.parallel ? Number(parsed.parallel) : undefined,
+          };
+        }
+      } catch {}
+    }
+  }
+  return {};
+}
+
   // 3. Mobile Android Tests Task
   const runAndroid = async () => {
     if (androidTestCases.length === 0) return;
+    const clientId = `client_android_${crypto.randomUUID()}`;
+    const secrets = loadLocalSecrets(dirPath);
+    const androidConfig =
+      androidDir && existsSync(androidDir) ? loadAndroidConfig(androidDir) : {};
+
+    const rawBundlePath =
+      options.bundle ||
+      options.b ||
+      options["app-android"] ||
+      androidConfig.bundlePath ||
+      undefined;
+
+    let androidAppPath: string | undefined = undefined;
+    if (rawBundlePath) {
+      if (existsSync(rawBundlePath)) {
+        androidAppPath = resolve(process.cwd(), rawBundlePath);
+      } else if (
+        androidDir &&
+        existsSync(resolve(androidDir, rawBundlePath))
+      ) {
+        androidAppPath = resolve(androidDir, rawBundlePath);
+      } else {
+        androidAppPath = resolve(process.cwd(), rawBundlePath);
+      }
+    }
+
+    const deviceName =
+      options.device ||
+      options.d ||
+      androidConfig.device ||
+      undefined;
+
+    const parallelCount =
+      options.parallel ||
+      options.p ||
+      androidConfig.parallel ||
+      1;
+
+    const client = new ClientAndroidExecutor({
+      serverUrl: WS_BASE_URL,
+      clientId,
+      appFilePath: androidAppPath,
+      appPackage: options.appPackage,
+      appActivity: options.appActivity,
+      deviceName,
+      secrets,
+    });
+
     try {
-      const androidAppPath =
-        options.bundle ||
-        options.b ||
-        options["app-android"] ||
-        resolve(
-          process.cwd(),
-          "sample-apps/flutter_sample_app/build/app/outputs/flutter-apk/app-debug.apk",
-        );
-      if (!existsSync(androidAppPath)) {
-        for (const tc of androidTestCases) {
-          renderer.completeTest(
-            tc.id,
-            "FAILED",
-            0,
-            `Android binary not found at ${androidAppPath}`,
-          );
+      await client.start();
+
+      // Inject local secrets into test case variables
+      const injectedAndroidTestCases = androidTestCases.map((tc) => {
+        const mergedVariables = { ...(tc.variables || {}) };
+        for (const [secKey, secVal] of Object.entries(secrets)) {
+          mergedVariables[`secret.${secKey}`] = secVal;
         }
-        return;
-      }
-      const secrets = loadLocalSecrets(dirPath);
-      const formData = new FormData();
-      const fileData = readFileSync(androidAppPath);
-      formData.append(
-        "appFile",
-        new Blob([fileData]),
-        basename(androidAppPath),
-      );
-      formData.append("platform", "android");
-      formData.append("testCases", JSON.stringify(androidTestCases));
-      if (executionId) formData.append("executionId", executionId);
-      if (secrets.AWS_PROJECT_ARN) {
-        formData.append("awsProjectArn", secrets.AWS_PROJECT_ARN);
-      }
+        return {
+          ...tc,
+          variables: mergedVariables,
+        };
+      });
 
       const res = await fetch(`${API_BASE_URL}/api/executions/mobile`, {
         method: "POST",
         headers: {
+          "Content-Type": "application/json",
           "x-api-key": apiKey,
           Authorization: `Bearer ${apiKey}`,
           "x-stream": "true",
+          "x-client-id": clientId,
         },
-        body: formData,
+        body: JSON.stringify({
+          clientId,
+          platform: "android",
+          testCases: injectedAndroidTestCases,
+          appFilePath: androidAppPath,
+          appPackage: options.appPackage,
+          appActivity: options.appActivity,
+          deviceName,
+          parallel: parallelCount,
+          executionId,
+        }),
       });
 
       if (!res.ok) {
@@ -1489,6 +1563,7 @@ function loadIosConfig(iosDir: string): {
                   msg.testCaseId,
                   msg.status,
                   msg.durationMs,
+                  msg.error,
                 );
               else if (msg.type === "execution_complete") {
                 if (msg.failedCount > 0) exitCode = 1;
@@ -1502,6 +1577,8 @@ function loadIosConfig(iosDir: string): {
       for (const tc of androidTestCases) {
         renderer.completeTest(tc.id, "FAILED", 0, errMsg);
       }
+    } finally {
+      await client.stop();
     }
   };
 
