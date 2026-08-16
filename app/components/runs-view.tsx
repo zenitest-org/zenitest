@@ -51,30 +51,42 @@ interface RunItem {
   triggeredBy: string;
 }
 
-export function PlatformBadge({ platform }: { platform: string }) {
+export function PlatformBadge({
+  platform,
+  className,
+}: {
+  platform: string;
+  className?: string;
+}) {
   const norm = platform.toLowerCase().trim();
-  let icon = <GlobeIcon className="size-3" />;
+  let icon = <GlobeIcon className="size-3.5" />;
   let label = "Web";
 
   if (norm === "ios") {
-    icon = <HugeiconsIcon icon={AppleIcon} size={12} className="size-3" strokeWidth={2} />;
+    icon = <HugeiconsIcon icon={AppleIcon} size={14} className="size-3.5" strokeWidth={2} />;
     label = "iOS";
   } else if (norm === "android") {
-    icon = <HugeiconsIcon icon={AndroidIcon} size={12} className="size-3" strokeWidth={2} />;
+    icon = <HugeiconsIcon icon={AndroidIcon} size={14} className="size-3.5" strokeWidth={2} />;
     label = "Android";
   } else if (norm === "web") {
-    icon = <GlobeIcon className="size-3" />;
+    icon = <GlobeIcon className="size-3.5" />;
     label = "Web";
   } else {
-    icon = <SmartphoneIcon className="size-3" />;
+    icon = <SmartphoneIcon className="size-3.5" />;
     label = platform;
   }
 
   return (
-    <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border border-zinc-200/60 dark:border-zinc-800 shrink-0">
+    <Badge
+      variant="outline"
+      className={cn(
+        "bg-zinc-100/80 text-zinc-700 border-zinc-200/80 gap-1.5 dark:bg-zinc-900 dark:text-zinc-300 dark:border-zinc-800 font-medium text-[11px] shrink-0 px-2.5 py-0.5 rounded-full",
+        className
+      )}
+    >
       {icon}
       <span>{label}</span>
-    </span>
+    </Badge>
   );
 }
 
