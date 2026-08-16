@@ -195,7 +195,9 @@ export function SettingsView() {
                     ? "bg-rose-500"
                     : "bg-zinc-900 dark:bg-zinc-100"
                 )}
-                style={{ width: maxWebMins < 0 ? "100%" : `${Math.max(3, webPct)}%` }}
+                style={{
+                  width: maxWebMins < 0 ? "100%" : usedWebMins === 0 ? "0%" : `${Math.max(1, webPct)}%`,
+                }}
               />
             </div>
           </div>
@@ -224,7 +226,9 @@ export function SettingsView() {
                     ? "bg-rose-500"
                     : "bg-zinc-900 dark:bg-zinc-100"
                 )}
-                style={{ width: maxMobileMins < 0 ? "100%" : `${Math.max(3, mobilePct)}%` }}
+                style={{
+                  width: maxMobileMins < 0 ? "100%" : usedMobileMins === 0 ? "0%" : `${Math.max(1, mobilePct)}%`,
+                }}
               />
             </div>
           </div>
