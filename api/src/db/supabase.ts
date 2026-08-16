@@ -231,7 +231,7 @@ export async function checkUserLimitation(
     .maybeSingle();
 
   const maxWeb = limitRow ? limitRow.max_minutes_web : (plan === "pro" ? -1 : 100);
-  const maxMobile = limitRow ? limitRow.max_minutes_mobile : (plan === "pro" ? 100 : 0);
+  const maxMobile = limitRow ? limitRow.max_minutes_mobile : (plan === "pro" ? -1 : 100);
 
   if (isMobile) {
     const used = user.minutes_used_mobile || 0;

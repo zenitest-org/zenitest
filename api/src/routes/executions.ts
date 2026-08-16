@@ -233,6 +233,12 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
         c.req.query("userId") ||
         (c.req.query("all") === "true" ? null : authUser.id);
       const status = c.req.query("status");
+      const search = (
+        c.req.query("search") ||
+        c.req.query("q") ||
+        c.req.query("id") ||
+        ""
+      ).trim();
       const limit = Number(c.req.query("limit")) || 20;
       const offset = Number(c.req.query("offset")) || 0;
 
@@ -248,6 +254,39 @@ export function createExecutionsRouter(ctx: ExecutionsRouteContext) {
 
       if (userId) query = query.eq("user_id", userId);
       if (status) query = query.eq("status", status);
+
+      if (search) {
+        const clean = search.toLowerCase();
+        const isUuid =
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            clean,
+          );
+        if (isUuid) {
+          query = query.eq("id", clean);
+        } else {
+          const hex = clean.replace(/[^0-9a-f]/gi, "");
+          if (
+            hex.length > 0 &&
+            hex.length <= 32 &&
+            /^[0-9a-f-]+$/i.test(clean)
+          ) {
+            const minHex = hex.padEnd(32, "0");
+            const maxHex = hex.padEnd(32, "f");
+            const minUuid = minHex.replace(
+              /^(.{8})(.{4})(.{4})(.{4})(.{12})$/,
+              "$1-$2-$3-$4-$5",
+            );
+            const maxUuid = maxHex.replace(
+              /^(.{8})(.{4})(.{4})(.{4})(.{12})$/,
+              "$1-$2-$3-$4-$5",
+            );
+            query = query.gte("id", minUuid).lte("id", maxUuid);
+          } else {
+            // Impossible UUID match when search is invalid hex
+            query = query.eq("id", "00000000-0000-0000-0000-000000000000");
+          }
+        }
+      }
 
       const { data, count, error } = await query;
 

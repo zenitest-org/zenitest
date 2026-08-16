@@ -933,6 +933,12 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
                 "android" ? (
                 <>
                   <div className="flex justify-between items-center p-3">
+                    <span className="text-muted-foreground">Platform:</span>
+                    <PlatformBadge
+                      platform={tc.info?.platform || tc.platform || "android"}
+                    />
+                  </div>
+                  <div className="flex justify-between items-center p-3">
                     <span className="text-muted-foreground">Device:</span>
                     <span className="font-medium text-foreground">
                       {tc.info?.device || tc.info?.browser || "AWS Device Farm"}

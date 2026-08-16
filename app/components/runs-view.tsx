@@ -34,6 +34,8 @@ import {
   PaginationPrevious,
   PaginationNext,
 } from "@/components/ui/pagination";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { AndroidIcon, AppleIcon } from "@hugeicons/core-free-icons";
 
 type RunStatus = "passed" | "failed" | "running";
 
@@ -51,20 +53,22 @@ interface RunItem {
 
 export function PlatformBadge({ platform }: { platform: string }) {
   const norm = platform.toLowerCase().trim();
-  const icon =
-    norm === "web" ? (
-      <GlobeIcon className="size-3" />
-    ) : (
-      <SmartphoneIcon className="size-3" />
-    );
-  const label =
-    norm === "web"
-      ? "Web"
-      : norm === "ios"
-        ? "iOS"
-        : norm === "android"
-          ? "Android"
-          : platform;
+  let icon = <GlobeIcon className="size-3" />;
+  let label = "Web";
+
+  if (norm === "ios") {
+    icon = <HugeiconsIcon icon={AppleIcon} size={12} className="size-3" strokeWidth={2} />;
+    label = "iOS";
+  } else if (norm === "android") {
+    icon = <HugeiconsIcon icon={AndroidIcon} size={12} className="size-3" strokeWidth={2} />;
+    label = "Android";
+  } else if (norm === "web") {
+    icon = <GlobeIcon className="size-3" />;
+    label = "Web";
+  } else {
+    icon = <SmartphoneIcon className="size-3" />;
+    label = platform;
+  }
 
   return (
     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[11px] font-medium bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border border-zinc-200/60 dark:border-zinc-800 shrink-0">
@@ -112,13 +116,16 @@ function RunsTable() {
   const { getToken, isSignedIn } = useAuth();
 
   const { data, isLoading } = useQuery({
-    queryKey: ["executions", statusFilter, page, pageSize],
+    queryKey: ["executions", statusFilter, searchQuery, page, pageSize],
     queryFn: async () => {
       const token = await getToken();
       const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001";
       const params = new URLSearchParams();
       if (statusFilter && statusFilter !== "all") {
         params.set("status", statusFilter);
+      }
+      if (searchQuery.trim()) {
+        params.set("search", searchQuery.trim());
       }
       params.set("limit", String(pageSize));
       params.set("offset", String(offset));
@@ -183,14 +190,7 @@ function RunsTable() {
     triggeredBy: "CLI / Runner",
   }));
 
-  const filteredRuns = runs.filter((run) => {
-    const matchesSearch =
-      run.suite.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      run.id.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (run.number && `#${run.number}`.includes(searchQuery));
-    const matchesStatus = statusFilter === "all" || run.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  const filteredRuns = runs;
 
   const statusOptions = [
     { value: "all", label: "All Status" },
@@ -209,7 +209,7 @@ function RunsTable() {
             <SearchIcon className=" text-muted-foreground size-3.5" />
             <input
               type="text"
-              placeholder="Search test suite or run ID..."
+              placeholder="Search by run ID..."
               value={searchQuery}
               onChange={(e) => updateParams(e.target.value, statusFilter, 1)}
               className="w-full  py-1.5 text-xs text-foreground bg-transparent dark:bg-transparent border-none rounded-lg focus:outline-none focus:ring-0 transition-all placeholder:text-muted-foreground"

@@ -30,9 +30,28 @@ export function createAuthRouter() {
       console.warn("[Auth Verify] Failed to fetch stored user usage minutes:", err);
     }
 
-    const plan = (user.plan || "free").toLowerCase();
-    const maxWebMinutes = plan === "pro" ? -1 : 100;
-    const maxMobileMinutes = plan === "pro" ? 100 : 0;
+    let maxWebMinutes = 100;
+    let maxMobileMinutes = 100;
+    try {
+      const { data: limitRow } = await supabase
+        .from("limitation")
+        .select("max_minutes_web, max_minutes_mobile")
+        .eq("plan", (user.plan || "free").toLowerCase())
+        .maybeSingle();
+
+      if (limitRow) {
+        maxWebMinutes = limitRow.max_minutes_web;
+        maxMobileMinutes = limitRow.max_minutes_mobile;
+      } else {
+        const plan = (user.plan || "free").toLowerCase();
+        maxWebMinutes = plan === "pro" ? -1 : 100;
+        maxMobileMinutes = plan === "pro" ? -1 : 100;
+      }
+    } catch {
+      const plan = (user.plan || "free").toLowerCase();
+      maxWebMinutes = plan === "pro" ? -1 : 100;
+      maxMobileMinutes = plan === "pro" ? -1 : 100;
+    }
 
     return c.json({
       success: true,
