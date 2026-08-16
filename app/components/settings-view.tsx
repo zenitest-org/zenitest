@@ -185,19 +185,6 @@ export function SettingsView() {
                 style={{ width: maxWebMins < 0 ? "100%" : `${Math.max(3, webPct)}%` }}
               />
             </div>
-
-            {currentPlan !== "pro" && (
-              <div className="flex justify-between items-center text-[11px] text-muted-foreground">
-                <span>{webPct}% used</span>
-                <Link
-                  href="/checkout"
-                  className="text-foreground hover:underline font-medium inline-flex items-center gap-1"
-                >
-                  <span>Upgrade</span>
-                  <ArrowRightIcon className="size-3" />
-                </Link>
-              </div>
-            )}
           </div>
 
           {/* Mobile Testing */}
@@ -227,19 +214,6 @@ export function SettingsView() {
                 style={{ width: maxMobileMins < 0 ? "100%" : `${Math.max(3, mobilePct)}%` }}
               />
             </div>
-
-            {currentPlan !== "pro" && (
-              <div className="flex justify-between items-center text-[11px] text-muted-foreground">
-                <span>{mobilePct}% used</span>
-                <Link
-                  href="/checkout"
-                  className="text-foreground hover:underline font-medium inline-flex items-center gap-1"
-                >
-                  <span>Upgrade</span>
-                  <ArrowRightIcon className="size-3" />
-                </Link>
-              </div>
-            )}
           </div>
         </div>
       </div>

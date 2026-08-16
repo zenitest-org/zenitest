@@ -1030,11 +1030,11 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
         {/* Right Content Area */}
         <div
           className={cn(
-            "lg:col-span-3 flex flex-col items-center justify-center p-4 overflow-hidden",
+            "lg:col-span-3 flex flex-col items-center justify-center overflow-hidden",
             (tc.info?.platform || tc.platform || "").toLowerCase() === "ios" ||
               (tc.info?.platform || tc.platform || "").toLowerCase() ===
                 "android"
-              ? "bg-slate-100/80 dark:bg-zinc-900/60"
+              ? "bg-slate-100/80 dark:bg-zinc-900/60 p-4"
               : "bg-muted/10",
           )}
         >

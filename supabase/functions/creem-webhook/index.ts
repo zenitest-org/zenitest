@@ -209,9 +209,11 @@ serve(async (req: Request) => {
       if (eventType === "subscription.canceled") {
         updateData.subscription_status = "canceled";
       } else {
-        // For expired / paused events, reset plan to 'free' while keeping subscription_status as 'active'
+        // For expired / paused events, reset plan to 'free', keep status active, and reset used minutes to 0
         updateData.plan = "free";
         updateData.subscription_status = "active";
+        updateData.minutes_used_web = 0;
+        updateData.minutes_used_mobile = 0;
       }
 
       const { error: updateError } = await supabase
