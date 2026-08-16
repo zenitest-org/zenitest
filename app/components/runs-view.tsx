@@ -17,7 +17,7 @@ import {
   SmartphoneIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
@@ -273,38 +273,39 @@ function RunsTable() {
               ) : filteredRuns.length === 0 ? (
                 <tr>
                   <td colSpan={5} className="px-5 py-12 text-center">
-                    <div className="flex flex-col items-center justify-center max-w-sm mx-auto space-y-3">
-                      <div className="size-10 rounded-full bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center text-foreground border border-zinc-200/80 dark:border-zinc-800">
-                        <RocketIcon className="size-5" />
+                    {searchQuery || (statusFilter && statusFilter !== "all") ? (
+                      <div className="py-6 text-center text-xs text-muted-foreground">
+                        No test executions found
                       </div>
-                      <div className="space-y-1">
-                        <h3 className="text-xs font-semibold text-foreground">
-                          No test executions found
-                        </h3>
-                        <p className="text-xs text-muted-foreground leading-relaxed">
-                          Run tests using the CLI runner or check your search
-                          filters.
-                        </p>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center max-w-sm mx-auto space-y-3">
+                        <div className="size-10 rounded-full bg-zinc-100 dark:bg-zinc-900 flex items-center justify-center text-foreground border border-zinc-200/80 dark:border-zinc-800">
+                          <RocketIcon className="size-5" />
+                        </div>
+                        <div className="space-y-1">
+                          <h3 className="text-xs font-semibold text-foreground">
+                            No test executions found
+                          </h3>
+                          <p className="text-xs text-muted-foreground leading-relaxed">
+                            Run tests using the CLI runner to see results here.
+                          </p>
+                        </div>
+                        <div className="pt-1">
+                          <a
+                            href="https://docs.zenitest.ai"
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            className={cn(
+                              buttonVariants({ variant: "outline", size: "sm" }),
+                              "h-8 text-xs font-medium cursor-pointer inline-flex items-center gap-1.5",
+                            )}
+                          >
+                            <BookOpenIcon className="size-3.5" />
+                            <span>Read docs</span>
+                          </a>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 pt-1">
-                        <Button
-                          size="sm"
-                          onClick={() => setSettingsModalOpen(true)}
-                          className="h-8 text-xs font-medium cursor-pointer"
-                        >
-                          Get started
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => router.push("/installation")}
-                          className="h-8 text-xs font-medium cursor-pointer"
-                        >
-                          <BookOpenIcon className="size-3.5 mr-1.5" />
-                          Read docs
-                        </Button>
-                      </div>
-                    </div>
+                    )}
                   </td>
                 </tr>
               ) : (
