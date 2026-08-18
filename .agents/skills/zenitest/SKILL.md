@@ -341,14 +341,6 @@ If your tests are in a different folder:
 zenitest run --dir ./my-custom-tests
 ```
 
-### Local Browser Client (Tunnel Mode)
-
-Start a local Playwright browser executor that connects to the ZeniTest server. This runs a headless browser on your machine for executing web tests locally:
-
-```bash
-zenitest client
-```
-
 ### Viewing Reports
 
 After a test run, fetch the summary report using the run number:
