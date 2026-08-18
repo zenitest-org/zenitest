@@ -53,34 +53,49 @@ zenitest run
 
 ### Run Web Tests
 
+Run against production URL (default):
+
 ```bash
-# Run against production URL (default)
 zenitest run --platform web --prod
+```
 
-# Run against local development server
+Run against local development server:
+
+```bash
 zenitest run --platform web --local
+```
 
-# Use a specific browser
+Use a specific browser:
+
+```bash
 zenitest run --platform web --browser firefox
 ```
 
 ### Run Mobile Tests
 
-```bash
-# Run Android tests with an APK
-zenitest run --platform android --bundle ./build/app-debug.apk
+Run Android tests with an APK:
 
-# Run iOS tests with an IPA on a specific device
+```bash
+zenitest run --platform android --bundle ./build/app-debug.apk
+```
+
+Run iOS tests with an IPA on a specific device:
+
+```bash
 zenitest run --platform ios --bundle ./build/Runner.ipa --device "iPhone 15 Pro"
 ```
 
 ### Run a Single Test
 
-```bash
-# By file path
-zenitest run zenitests/web/tc_login.yaml
+By file path:
 
-# By test ID (the CLI searches all platform folders)
+```bash
+zenitest run zenitests/web/tc_login.yaml
+```
+
+By test ID (the CLI searches all platform folders):
+
+```bash
 zenitest run tc_login
 ```
 
@@ -90,11 +105,15 @@ zenitest run tc_login
 
 Shows the summary and step breakdown of a previous test run:
 
-```bash
-# Formatted terminal output
-zenitest report <run_number>
+Formatted terminal output:
 
-# Machine-readable JSON output
+```bash
+zenitest report <run_number>
+```
+
+Machine-readable JSON output:
+
+```bash
 zenitest report <run_number> --json
 ```
 
@@ -102,5 +121,8 @@ Example:
 
 ```bash
 zenitest report 14
+```
+
+```bash
 zenitest report 14 --json
 ```
