@@ -11,18 +11,27 @@
 .expressive-code .frame:not(.has-title) .header {
 	background: transparent !important;
 	border-bottom: none !important;
-	min-height: 2.25rem !important;
-	padding: 0.25rem 0.5rem !important;
+	min-height: 0 !important;
+	padding: 0 !important;
+	height: 0 !important;
 }
 
 /* Ensure code blocks have rounded corners and proper code text padding */
 .expressive-code .frame {
 	border-radius: 8px !important;
 	overflow: hidden !important;
+	position: relative !important;
 }
 
-/* Position copy button neatly in header */
+/* Position copy button inside the code block frame, top-right corner */
 .expressive-code .frame .copy {
-	top: 0.25rem !important;
+	position: absolute !important;
+	top: 0.5rem !important;
 	right: 0.5rem !important;
+	z-index: 10 !important;
+}
+
+/* Give code content enough right padding so text doesn't overlap the copy button */
+.expressive-code .frame pre {
+	padding-right: 3rem !important;
 }

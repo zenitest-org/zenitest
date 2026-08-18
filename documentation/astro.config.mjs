@@ -23,18 +23,12 @@ export default defineConfig({
           ],
         }),
       ],
-      social: [
-        {
-          icon: "github",
-          label: "GitHub",
-          href: "https://github.com/zeni-org/zenitest",
-        },
-      ],
       sidebar: [
         {
           label: "Getting Started",
           items: [
             { label: "Introduction", slug: "getting-started/introduction" },
+            { label: "Requirements", slug: "getting-started/requirements" },
             { label: "Quickstart", slug: "getting-started/quickstart" },
           ],
         },
@@ -45,7 +39,7 @@ export default defineConfig({
         {
           label: "Writing Tests",
           items: [
-            { label: "YAML Format", slug: "yaml-spec/overview" },
+            { label: "Folder & Config", slug: "yaml-spec/overview" },
             { label: "Step Actions", slug: "yaml-spec/actions" },
             {
               label: "Variables & Secrets",

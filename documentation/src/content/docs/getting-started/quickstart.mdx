@@ -1,105 +1,135 @@
 ---
 title: Quickstart Guide
-description: Get started with ZeniTest in under 2 minutes.
+description: Get up and running with ZeniTest in under 2 minutes.
 ---
 
 import { Tabs, TabItem } from "@astrojs/starlight/components";
 
 Run your first automated test in under 2 minutes.
 
+> **Before you start:** Make sure you have the necessary tools for your platform (browsers for Web, Android Studio for Android, Xcode for iOS). See [Requirements](/getting-started/requirements/) for the full checklist.
+
 ---
 
-## 1. Install ZeniTest CLI
+## 1. Install the CLI
 
-Install the CLI globally using your preferred package manager:
+Install the `zenitest` command line tool globally:
 
 <Tabs>
-  <TabItem label="npm">```bash npm install -g zenitest ```</TabItem>
-  <TabItem label="pnpm">```bash pnpm add -g zenitest ```</TabItem>
-  <TabItem label="yarn">```bash yarn global add zenitest ```</TabItem>
-  <TabItem label="bun">```bash bun install -g zenitest ```</TabItem>
+  <TabItem label="npm">
+    ```bash
+    npm install -g zenitest
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```bash
+    pnpm add -g zenitest
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```bash
+    yarn global add zenitest
+    ```
+  </TabItem>
+  <TabItem label="bun">
+    ```bash
+    bun install -g zenitest
+    ```
+  </TabItem>
 </Tabs>
 
 ---
 
-## 2. Authenticate API Key
+## 2. Install AI Agent Skill
+
+Install the ZeniTest skill into your AI coding assistant (Claude Code, Cursor, Antigravity, Codex, etc.) so it can write and maintain tests for you:
+
+<Tabs>
+  <TabItem label="npm">
+    ```bash
+    npx skills add zenitest-org/skills
+    ```
+  </TabItem>
+  <TabItem label="pnpm">
+    ```bash
+    pnpm dlx skills add zenitest-org/skills
+    ```
+  </TabItem>
+  <TabItem label="yarn">
+    ```bash
+    yarn dlx skills add zenitest-org/skills
+    ```
+  </TabItem>
+  <TabItem label="bun">
+    ```bash
+    bunx skills add zenitest-org/skills
+    ```
+  </TabItem>
+</Tabs>
+
+---
+
+## 3. Log in with your API Key
+
+Link your account using your API key:
 
 ```bash
-zenitest auth your_api_key
+zenitest auth <your_api_key>
 ```
 
 ---
 
-## 3. Install AI Agent Skill (Optional)
+## 4. Generate Tests with AI
 
-Enable coding assistants (Claude Code, Cursor, Codex, etc.) to generate and maintain tests automatically:
+You can now use the `/zenitest` command in your AI coding assistant to automatically generate your test files:
 
-<Tabs>
-  <TabItem label="npm">``` bash npx skills add zeni-org/zenitest ```</TabItem>
-  <TabItem label="pnpm">
-    ``` bash pnpm dlx skills add zeni-org/zenitest ```
-  </TabItem>
-  <TabItem label="yarn">
-    ``` bash yarn dlx skills add zeni-org/zenitest ```
-  </TabItem>
-  <TabItem label="bun">``` bash bunx skills add zeni-org/zenitest ```</TabItem>
-</Tabs>
+```text
+/zenitest Create a Web E2E test case for our login flow
+```
 
----
+Or for mobile apps:
 
-## 4. Create Test Case
+```text
+/zenitest Create an Android test in zenitests/android/ for our checkout workflow
+```
 
-Save test scenarios in `.yaml` files inside `zenitests/web/`, `zenitests/ios/`, or `zenitests/android/`:
+Your AI assistant will create the test `.yaml` file directly in your `zenitests/` directory.
 
-<Tabs>
-  <TabItem label="Web">
-    ```yaml
-    id: tc_login
-    title: SauceDemo Login Test
-    localUrl: http://localhost:3000
-    prodURL: https://www.saucedemo.com
-    expectedResult: Inventory page loaded.
+### Example Generated Test (`zenitests/web/tc_login.yaml`)
 
-    steps:
-      - navigate: /
-      - act: Type 'standard_user' into 'Username'
-      - act: Type 'secret_sauce' into 'Password'
-      - act: Click 'Login'
-      - validate: Verify 'Products' page title is displayed
-    ```
+```yaml
+id: tc_login
+title: Login Test
+expectedResult: User is logged in and sees the product inventory.
 
-  </TabItem>
-  <TabItem label="Mobile">
-    ```yaml
-    id: tc_mobile_ecommerce
-    title: Mobile Checkout Test
-    expectedResult: Order placed successfully on iOS.
-
-    steps:
-      - act: Tap the Add button on ZeniPods Pro
-      - validate: Cart badge displays 1
-      - act: Tap the Cart icon
-      - act: Tap Proceed to Checkout
-      - validate: Verify Order Placed Successfully! text is displayed
-    ```
-
-  </TabItem>
-</Tabs>
+steps:
+  - navigate: /
+  - act: Type 'standard_user' into 'Username'
+  - act: Type 'secret_sauce' into 'Password'
+  - act: Click 'Login'
+  - validate: Verify 'Products' page title is displayed
+```
 
 ---
 
-## 5. Run Tests
+## 5. Run the Tests
 
-Execute web or mobile test suites from your terminal:
+Execute your test suite from your terminal:
 
-<Tabs>
-  <TabItem label="Web">```bash zenitest run --platform web ```</TabItem>
-  <TabItem label="iOS">
-    ```bash zenitest run --platform ios --bundle ./build/Runner.ipa ```
-  </TabItem>
-  <TabItem label="Android">
-    ```bash zenitest run --platform android --bundle ./build/app-debug.apk ```
-  </TabItem>
-</Tabs>
+Run all tests:
 
-That's it! ZeniTest will execute your test actions and report real-time pass/fail status in your terminal. For detailed mobile testing options, see the [Mobile Testing Guide](/guides/mobile-testing/).
+```bash
+zenitest run
+```
+
+Run only web tests:
+
+```bash
+zenitest run --platform web
+```
+
+Run mobile tests:
+
+```bash
+zenitest run --platform android --bundle ./build/app-debug.apk
+```

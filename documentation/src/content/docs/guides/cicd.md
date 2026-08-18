@@ -1,38 +1,51 @@
 ---
 title: CI/CD Setup
-description: Run ZeniTest in GitHub Actions.
+description: Automatically run your tests on every push or pull request with GitHub Actions.
 ---
 
-# CI/CD Setup
+Run your ZeniTest suite automatically whenever you push code or open a pull request.
 
-Automate your tests on every push or pull request.
+---
 
-## GitHub Actions Example
+## GitHub Actions Workflow
 
-Add `.github/workflows/e2e.yml`:
+Create a file named `.github/workflows/e2e.yml` in your repository:
 
 ```yaml
 name: E2E Tests
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
 jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v1
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-      - name: Create Secrets File
-        run: |
-          cat <<EOF > secrets.yaml
-          secrets:
-            SAUCE_PASSWORD: "${{ secrets.SAUCE_PASSWORD }}"
-          EOF
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
 
-      - name: Run ZeniTest
+      - name: Install ZeniTest
+        run: npm install -g zenitest
+
+      - name: Run Tests
         env:
           ZENI_API_KEY: ${{ secrets.ZENI_API_KEY }}
-        run: |
-          bunx zenitest run --dir zenitests
+        run: zenitest run --platform web
 ```
+
+---
+
+## Adding your API Key to GitHub
+
+1. Go to your GitHub repository **Settings**.
+2. Click **Secrets and variables** > **Actions**.
+3. Click **New repository secret**.
+4. Set the name to `ZENI_API_KEY` and paste your API key in the value box.

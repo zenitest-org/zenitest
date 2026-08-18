@@ -1,0 +1,75 @@
+---
+title: Requirements
+description: What you need installed to run tests for Web, iOS, and Android.
+---
+
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+Before running your test suites, ensure you have the required tools installed for your target platforms.
+
+---
+
+## 1. General Requirements
+
+To run the `zenitest` CLI on your machine:
+
+- **Node.js**: Version 18 or higher (or **Bun** / **pnpm** / **yarn**)
+- **ZeniTest CLI**: Installed globally via `npm install -g zenitest`
+- **ZeniTest API Key**: Get your API key from the ZeniTest dashboard
+
+---
+
+## 2. Web Testing Requirements
+
+To run web browser tests:
+
+- **Automatic Browser Installation**: You do not need to manually install or manage browser drivers. When you run a web test, ZeniTest will **automatically download and install the required browser** (Chromium, Firefox, or WebKit) if it is not already present on your machine.
+- **Supported Browsers**:
+  - **Chromium** (Default)
+  - **Google Chrome** (Uses system Chrome if installed)
+  - **Mozilla Firefox**
+  - **WebKit / Safari**
+
+> **Tip:** You don't need WebDriver binaries, ChromeDriver, or Selenium servers. Everything runs out of the box.
+
+---
+
+## 3. Android Testing Requirements
+
+To run tests on Android mobile applications:
+
+- **Android Studio & SDK**:
+  - Install [Android Studio](https://developer.android.com/studio).
+  - Ensure `ANDROID_HOME` or `ANDROID_SDK_ROOT` is set in your environment, with `platform-tools` (containing `adb`) added to your `PATH`.
+- **An Active Device**:
+  - **Android Emulator**: An AVD (Android Virtual Device) created in Android Studio and running.
+  - **OR a Physical Device**: Connected via USB with **USB Debugging** enabled in Developer Options.
+- **App Binary**: Built `.apk` file (e.g. `./build/app-debug.apk`).
+
+---
+
+## 4. iOS Testing Requirements
+
+To run tests on iOS mobile applications:
+
+- **macOS**: An Apple Mac computer running macOS.
+- **Xcode**:
+  - Install [Xcode](https://developer.apple.com/xcode/) from the Mac App Store.
+  - Install Xcode Command Line Tools:
+    ```bash
+    xcode-select --install
+    ```
+- **An Active Device**:
+  - **iOS Simulator**: Launched via Xcode or Simulator app.
+  - **OR a Physical iPhone / iPad**: Connected to your Mac with Developer Mode enabled.
+- **App Binary**: Built `.app` (for Simulators) or `.ipa` (for Physical Devices).
+
+---
+
+## Quick Summary Table
+
+| Platform | Required Software | Device / Runtime | Target |
+| :--- | :--- | :--- | :--- |
+| **Web** | Node.js (18+) | Auto-installed (Chromium / Firefox / WebKit) | URL set in config.yaml |
+| **Android** | Android Studio & SDK (`adb`) | Android Emulator or USB Device | `.apk` |
+| **iOS** | macOS & Xcode | iOS Simulator or USB iPhone | `.app` / `.ipa` |

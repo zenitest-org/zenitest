@@ -1,52 +1,66 @@
 ---
 title: Step Actions
+description: The 3 core step actions used to write ZeniTest tests.
 ---
 
-Every step in your test uses one of three simple actions:
+Every test is built using three straightforward actions:
 
-## 1. `navigate`
-Opens a relative path or full URL (used for Web tests; omitted for Mobile tests).
+---
+
+## 1. `navigate` (Web only)
+
+Opens a webpage or URL.
 
 ```yaml
 - navigate: /
+- navigate: /login
 - navigate: /settings
-- navigate: https://example.com/checkout
+- navigate: https://example.com/pricing
 ```
+
+---
 
 ## 2. `act`
-Performs an action or mobile gesture using natural language instructions.
 
-### Typing & Text Entry (Web & Mobile)
+Tells ZeniTest what to do on the screen in plain language.
+
+### Typing Text
 ```yaml
-- act: Type 'John' into the 'First Name' input field
-- act: Type '${secret.MY_PASSWORD}' into 'Password'
+- act: Type 'john@example.com' into the Email input field
+- act: Type '${secret.PASSWORD}' into the Password input field
 ```
 
-### Clicking & Tapping (Web & Mobile)
+### Clicking & Tapping
 ```yaml
-- act: Click on the 'Login' button
-- act: Tap the Cart icon to open the cart sheet drawer
-- act: Press the 'Proceed to Checkout' button
+- act: Click on the 'Sign In' button
+- act: Tap the 'Add to Cart' button
+- act: Tap the Shopping Cart icon
 ```
 
-### Selecting, Checking & Swiping
+### Selecting, Checking & Scrolling
 ```yaml
 - act: Select 'Price: Low to High' from dropdown
-- act: Check 'Remember me' checkbox
-- act: Scroll down to view product details
+- act: Check the 'I agree to Terms' checkbox
+- act: Scroll down to product reviews
 ```
+
+---
 
 ## 3. `validate`
-Verifies page or mobile screen content visually using AI.
 
-### Web Assertions
+Checks that an element, text, or page state is displayed as expected.
+
 ```yaml
-- validate: Verify 'Welcome back' message appears
-- validate: Verify shopping cart shows 2 items
+- validate: Verify 'Welcome back, John' is visible
+- validate: Cart badge shows '1'
+- validate: 'Order Placed Successfully!' message is displayed
+- validate: Verify the 'Checkout' button is enabled
 ```
 
-### Mobile Assertions
-```yaml
-- validate: Cart badge displays 1
-- validate: Order Placed Successfully! text and Continue Shopping button are displayed
-```
+---
+
+## Tips for Writing Steps
+
+1. **Use visible text**: Write the exact words you see on the button, link, or input label (e.g. `Click 'Submit'`, `Type into 'First Name'`).
+2. **Keep each step focused**: Do one action per `act` line (e.g. type text first, then click button on the next line).
+3. **Validate key milestones**: Add a `validate` step after important transitions (like form submissions or page changes).

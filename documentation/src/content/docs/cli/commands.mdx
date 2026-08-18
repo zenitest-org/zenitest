@@ -1,86 +1,118 @@
 ---
 title: CLI Commands
-description: Reference for zenitest CLI commands and installation.
+description: Simple reference for all ZeniTest command line options.
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-# CLI Reference
+# CLI Commands Reference
 
-Execute tests and manage authentication from your terminal.
-
----
-
-## Installation
-
-Install the `zenitest` CLI globally using your preferred package manager:
-
-<Tabs>
-  <TabItem label="npm">
-    ```bash
-    npm install -g zenitest
-    ```
-  </TabItem>
-  <TabItem label="pnpm">
-    ```bash
-    pnpm add -g zenitest
-    ```
-  </TabItem>
-  <TabItem label="yarn">
-    ```bash
-    yarn global add zenitest
-    ```
-  </TabItem>
-  <TabItem label="bun">
-    ```bash
-    bun install -g zenitest
-    ```
-  </TabItem>
-</Tabs>
+Run tests, manage API keys, and view reports from your terminal.
 
 ---
 
 ## `zenitest auth`
 
-Saves your Zeni API key to local configuration.
+Saves your ZeniTest API key to your local machine:
 
 ```bash
-zenitest auth YOUR_API_KEY
+zenitest auth <your_api_key>
 ```
+
+If you leave out the key, the CLI will ask you to type it in. Your key is stored at `~/.zenitest/config.json`.
 
 ---
 
 ## `zenitest run`
 
-Runs all `.yaml` test files in your test directory.
+Runs your test cases:
 
 ```bash
+# Run all tests in the zenitests/ folder
 zenitest run
 ```
 
-### Options & Flags
+### Common Flags
 
-| Flag | Short | Description | Default |
-| --- | --- | --- | --- |
-| `--dir <path>` | `-d` | Path to test directory | `zenitests` |
-| `--platform <target>` | `-t` | Filter platform target (`web`, `ios`, `android`, or comma-separated list) | All platforms in folder |
-| `--bundle <path>` | `-b` | Path to built mobile app binary file (`.ipa` or `.apk`) | None |
-| `--parallel <n>` | `-p` | Number of web test cases to run concurrently | `5` |
-| `--help` | `-h` | Show CLI help screen | |
+| Option | Flag | Description | Default |
+| :--- | :--- | :--- | :--- |
+| **Platform** | `--platform`, `-t` | Filter by `web`, `ios`, or `android` | All platforms |
+| **Local URL** | `--local` | Run web tests against the local URL from config | — |
+| **Prod URL** | `--prod` | Run web tests against the production URL from config | ✓ (default) |
+| **Environment** | `--env`, `-e` | Target environment: `local` or `prod` | `prod` |
+| **Browser** | `--browser` | Web browser: `chromium`, `chrome`, `firefox`, `safari` | `chromium` |
+| **Mobile App** | `--bundle`, `-b` | Path to `.ipa`, `.app`, or `.apk` file | From config |
+| **Device** | `--device` | Target device or simulator name | From config |
+| **Parallel** | `--parallel`, `-p` | Number of tests to run at the same time | `5` |
+| **Test File** | `--file`, `-f` | Run a specific test by filename | — |
+| **Custom Folder** | `--dir`, `-d` | Custom path to test files | `zenitests` |
 
-### Example Usage
+---
 
-#### Web Test Suite
+## Common Examples
+
+### Run Web Tests
+
 ```bash
-zenitest run --dir zenitests --platform web --parallel 3
+# Run against production URL (default)
+zenitest run --platform web --prod
+
+# Run against local development server
+zenitest run --platform web --local
+
+# Use a specific browser
+zenitest run --platform web --browser firefox
 ```
 
-#### Mobile iOS App Test Suite
-```bash
-zenitest run --platform ios --bundle ./build/Runner.ipa
-```
+### Run Mobile Tests
 
-#### Mobile Android App Test Suite
 ```bash
+# Run Android tests with an APK
 zenitest run --platform android --bundle ./build/app-debug.apk
+
+# Run iOS tests with an IPA on a specific device
+zenitest run --platform ios --bundle ./build/Runner.ipa --device "iPhone 15 Pro"
+```
+
+### Run a Single Test
+
+```bash
+# By file path
+zenitest run zenitests/web/tc_login.yaml
+
+# By test ID (the CLI searches all platform folders)
+zenitest run tc_login
+```
+
+---
+
+## `zenitest client`
+
+Starts a local headless browser on your machine that connects to the ZeniTest server. Use this when you want to run web tests using your own machine's browser rather than a cloud session:
+
+```bash
+zenitest client
+```
+
+Press `Ctrl+C` to stop the client.
+
+---
+
+## `zenitest report`
+
+Shows the summary and step breakdown of a previous test run:
+
+```bash
+# Formatted terminal output
+zenitest report <run_number>
+
+# Machine-readable JSON output
+zenitest report <run_number> --json
+```
+
+Example:
+
+```bash
+zenitest report 14
+zenitest report 14 --json
 ```

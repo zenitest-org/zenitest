@@ -1,35 +1,35 @@
 ---
 title: Test Examples
-description: Sample ZeniTest YAML test cases.
+description: Ready-to-use sample test cases for Web and Mobile.
 ---
 
-# Sample Test Cases
+Here are sample test cases you can copy and adapt for your own apps.
 
-## Login Test Example
+---
+
+## 1. Web Login Test (`zenitests/web/tc_login.yaml`)
 
 ```yaml
 id: tc_login
-title: Login Test
-localUrl: http://localhost:3000
-prodURL: https://www.saucedemo.com
-expectedResult: Swag Labs inventory page is displayed.
+title: Standard User Login
+expectedResult: User is logged in and the product inventory page is displayed.
 
 steps:
   - navigate: /
   - act: Type 'standard_user' into 'Username'
   - act: Type '${secret.SAUCE_PASSWORD}' into 'Password'
   - act: Click 'Login'
-  - validate: Verify 'Products' page title is displayed
+  - validate: Verify the 'Products' heading is displayed
 ```
 
-## E-Commerce Checkout Example
+---
+
+## 2. Web E-Commerce Checkout (`zenitests/web/tc_checkout.yaml`)
 
 ```yaml
 id: tc_checkout
-title: Add to Cart & Checkout
-localUrl: http://localhost:3000
-prodURL: https://www.saucedemo.com
-expectedResult: Order confirmation message displayed.
+title: Add to Cart & Checkout Workflow
+expectedResult: Order confirmation message is displayed after checkout.
 
 steps:
   - navigate: /
@@ -37,7 +37,7 @@ steps:
   - act: Type '${secret.SAUCE_PASSWORD}' into 'Password'
   - act: Click 'Login'
   - act: Click 'Add to cart' on 'Sauce Labs Backpack'
-  - act: Click shopping cart icon
+  - act: Click the shopping cart icon
   - act: Click 'Checkout'
   - act: Type 'Alex' into 'First Name'
   - act: Type 'Morgan' into 'Last Name'
@@ -45,4 +45,40 @@ steps:
   - act: Click 'Continue'
   - act: Click 'Finish'
   - validate: Verify 'Thank you for your order!' is displayed
+```
+
+---
+
+## 3. Mobile iOS Checkout (`zenitests/ios/tc_ios_checkout.yaml`)
+
+```yaml
+id: tc_ios_checkout
+title: iOS E-Commerce Order Flow
+expectedResult: Order confirmation message is displayed on iOS.
+
+steps:
+  - act: Tap the 'Add' button on the 'ZeniPods Pro' product card
+  - validate: Cart badge shows '1'
+  - act: Tap the Cart icon
+  - validate: 'Your Cart' title and 'Proceed to Checkout' button are visible
+  - act: Tap 'Proceed to Checkout'
+  - validate: 'Order Placed Successfully!' is displayed
+```
+
+---
+
+## 4. Mobile Android Checkout (`zenitests/android/tc_android_checkout.yaml`)
+
+```yaml
+id: tc_android_checkout
+title: Android E-Commerce Order Flow
+expectedResult: Order confirmation message is displayed on Android.
+
+steps:
+  - act: Tap the 'Add' button on the 'ZeniPods Pro' product card
+  - validate: Cart badge shows '1'
+  - act: Tap the Cart icon
+  - validate: 'Your Cart' title and 'Proceed to Checkout' button are visible
+  - act: Tap 'Proceed to Checkout'
+  - validate: 'Order Placed Successfully!' is displayed
 ```

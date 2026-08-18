@@ -1,132 +1,115 @@
 ---
 title: Mobile Testing (iOS & Android)
-description: End-to-end automated testing for iOS and Android apps with AI-powered vision and simple natural language steps.
+description: How to test iOS (.ipa) and Android (.apk) mobile apps using plain English YAML tests.
 ---
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-ZeniTest provides native **Mobile E2E Testing** for iOS (`.ipa`) and Android (`.apk`) applications. Powered by AI vision, ZeniTest understands your app's screens directly and executes natural language steps on real devices without requiring complex code or fragile element locators.
+ZeniTest allows you to run automated tests on **iOS apps (`.ipa`)** and **Android apps (`.apk`)** without writing native Appium or UIAutomator test code.
 
 ---
 
-## Overview & Features
+## Prerequisites
 
-- **Cross-Platform Support**: Test native iOS (`.ipa`) and Android (`.apk`) mobile applications.
-- **Flexible Test Execution**:
-  - **Cloud Device Cloud**: Run test suites on physical mobile devices in the cloud.
-  - **Local Simulators & Emulators**: Run tests locally on iOS Simulators and Android Emulators.
-- **Fast Build Caching**: Automatic build caching optimizes launch times by skipping unnecessary binary re-uploads.
-- **Real-Time Visual Feedback**: View step-by-step screenshots, action breakdowns, and test execution results live in your terminal or dashboard.
+- **For Android Testing**: Android Studio & SDK (`adb` in PATH), an active Android Emulator or connected physical device with USB Debugging enabled, and your built `.apk`.
+- **For iOS Testing**: macOS, Xcode & Xcode Command Line Tools (`xcode-select --install`), an active iOS Simulator or connected iPhone with Developer Mode, and your built `.app` or `.ipa`.
 
 ---
 
-## Organizing Mobile Test Cases
+## 1. Organizing Mobile Tests
 
-Organize your test cases into platform subfolders inside your main test directory (`zenitests`):
+Place mobile test files in `zenitests/ios/` or `zenitests/android/`:
 
 ```text
 zenitests/
-├── web/
-│   └── tc_web_login.yaml
 ├── ios/
-│   └── tc_mobile_ios_checkout.yaml
+│   ├── config.yaml              # Default iOS settings (optional)
+│   └── tc_ios_checkout.yaml
 └── android/
-    └── tc_mobile_android_checkout.yaml
+    ├── config.yaml              # Default Android settings (optional)
+    └── tc_android_checkout.yaml
 ```
 
----
+### Mobile Configuration (`config.yaml`)
 
-## Writing Mobile Test Cases
-
-Mobile test scenarios use simple, human-readable YAML. For mobile tests, the application launches automatically at test start, so you don't need to specify a starting webpage URL or navigation step.
-
-### Key Fields
-
-| Key | Description | Required |
-| --- | --- | --- |
-| `id` | Unique identifier (e.g., `tc_mobile_ios_checkout`) | Yes |
-| `title` | Brief summary of the scenario | Yes |
-| `priority` | Priority rating (`P0`, `P1`, `P2`) | Optional |
-| `expectedResult` | Expected final outcome | Yes |
-| `steps` | Sequence of test actions (`act`) and visual checks (`validate`) | Yes |
-
-### Supported Actions (`act`)
-
-- **Tapping & Clicking**: `Tap 'Add to Cart'` or `Click 'Sign In'`
-- **Text Input**: `Type 'user@example.com' into 'Email'`
-- **Scrolling**: `Scroll down to view product overview`
-- **Button Press**: `Press 'Proceed to Checkout'`
-
-### Visual Checks (`validate`)
-
-- `validate: Cart badge displays 1`
-- `validate: Verify 'Order Placed Successfully!' message appears`
-
----
-
-## Example Mobile Test Case
-
-Save as `zenitests/ios/tc_mobile_ios_ecommerce.yaml`:
-
-```yaml
-id: tc_mobile_ios_ecommerce
-title: Mobile iOS Checkout Workflow
-priority: P0
-expectedResult: Item added to cart and checkout completed successfully on iOS device
-
-steps:
-  - act: Tap the Add button on the Wireless Headphones product card
-  - validate: Cart badge displays 1
-
-  - act: Tap the Cart icon to open cart
-  - validate: Your Cart header and Checkout button are displayed
-
-  - act: Tap Proceed to Checkout
-  - validate: Verify 'Order Placed Successfully!' text is displayed
-```
-
----
-
-## Running Mobile Tests
-
-Execute mobile tests from your terminal using the `zenitest run` command with the `--platform` and `--bundle` flags:
+You can set default device and app binary paths so you don't have to type them every time:
 
 <Tabs>
-  <TabItem label="iOS">
-    ```bash
-    zenitest run --platform ios --bundle ./build/Runner.ipa
+  <TabItem label="iOS (zenitests/ios/config.yaml)">
+    ```yaml
+    bundlePath: build/Runner.app    # .app for Simulator, .ipa for device
+    device: iPhone 15 Pro
+    parallel: 1
     ```
   </TabItem>
-  <TabItem label="Android">
-    ```bash
-    zenitest run --platform android --bundle ./build/app-debug.apk
-    ```
-  </TabItem>
-  <TabItem label="All Platforms">
-    ```bash
-    zenitest run --dir zenitests --bundle ./build/app-debug.apk
+  <TabItem label="Android (zenitests/android/config.yaml)">
+    ```yaml
+    bundlePath: build/app-debug.apk
+    device: Pixel 7
+    parallel: 1
     ```
   </TabItem>
 </Tabs>
 
 ---
 
-## CLI Options
+## 2. Writing a Mobile Test
 
-| Flag | Short | Description | Example |
-| --- | --- | --- | --- |
-| `--platform <target>` | `-t` | Filter test target platform (`web`, `ios`, `android`) | `--platform ios` |
-| `--bundle <path>` | `-b` | Path to mobile app binary (`.ipa` or `.apk`) | `--bundle ./build/Runner.ipa` |
-| `--dir <path>` | `-d` | Path to test directory | `--dir zenitests` |
+Mobile tests do not need a starting URL or `navigate` step because the app opens automatically when the test starts.
+
+### Example Android Test (`zenitests/android/tc_checkout.yaml`)
+
+```yaml
+id: tc_android_checkout
+title: Product Checkout Flow
+expectedResult: Order confirmation message is displayed
+
+steps:
+  - act: Tap the 'Add to Cart' button on 'ZeniPods Pro'
+  - validate: Cart badge shows '1'
+  - act: Tap the Cart icon
+  - validate: 'Your Cart' title and 'Proceed to Checkout' button are visible
+  - act: Tap 'Proceed to Checkout'
+  - validate: 'Order Placed Successfully!' is displayed
+```
 
 ---
 
-## Secure Configuration
+## 3. Running Mobile Tests
 
-Store sensitive credentials or environment keys safely in your local `secrets.yaml` file:
+Run tests by pointing the CLI to your built `.apk` or `.ipa` app binary:
 
-```yaml
-secrets:
-  MY_TEST_USER: user@example.com
-  MY_TEST_PASSWORD: securePassword123
+### Android (`.apk`)
+```bash
+zenitest run --platform android --bundle ./build/app-debug.apk
 ```
+
+### iOS (`.ipa`)
+```bash
+zenitest run --platform ios --bundle ./build/Runner.ipa
+```
+
+### Targeting a Specific Device
+
+Use the `--device` flag to choose which emulator, simulator, or physical device to run on:
+
+```bash
+# Android emulator
+zenitest run --platform android --bundle ./build/app-debug.apk --device "Pixel 7"
+
+# iOS simulator
+zenitest run --platform ios --bundle ./build/Runner.app --device "iPhone 15 Pro"
+```
+
+> **Tip:** If you set `bundlePath` and `device` in your `config.yaml`, you can simply run `zenitest run --platform ios` without any extra flags.
+
+---
+
+## 4. Mobile Actions & Gestures
+
+Use natural English phrases inside `act` steps:
+
+- **Tapping**: `Tap 'Login'`, `Tap the Shopping Cart icon`
+- **Typing**: `Type 'alex@example.com' into 'Email Address'`
+- **Scrolling**: `Scroll down to see the Checkout button`
+- **Checking**: `validate: Verify 'Welcome' text is visible`

@@ -43,8 +43,10 @@ import { Card, CardGrid } from '@astrojs/starlight/components';
 ```yaml
 id: tc_login
 title: User Login Test
-prodURL: https://www.saucedemo.com
 expectedResult: Inventory page is displayed after login.
+
+variables:
+  username: standard_user
 
 steps:
   - navigate: /

@@ -181,7 +181,7 @@ export class ClientWebExecutor {
               : "chromium";
         try {
           console.log(`[ClientWebExecutor] Installing Playwright ${installTarget}...`);
-          execSync(`npx playwright install ${installTarget}`, { stdio: "inherit" });
+          execSync(`npx -y @playwright/test install ${installTarget}`, { stdio: "inherit" });
 
           if (b === "firefox") {
             this.browser = await firefox.launch({

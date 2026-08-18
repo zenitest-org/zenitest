@@ -1,65 +1,118 @@
 ---
-title: YAML Format
-description: Overview of the ZeniTest test case format.
+title: Folder Structure & Config
+description: How test directories and config.yaml files are organized in ZeniTest.
 ---
 
-ZeniTest test files are saved as `.yaml` files in your test folder (default: `zenitests`).
+import { Tabs, TabItem } from '@astrojs/starlight/components';
 
-## Directory Organization
-
-Organize test files into platform subfolders to enable automatic platform detection:
-
-- `zenitests/web/*.yaml`: Web browser end-to-end tests.
-- `zenitests/ios/*.yaml`: iOS native mobile app tests.
-- `zenitests/android/*.yaml`: Android native mobile app tests.
+All ZeniTest tests and settings are organized inside a single `zenitests/` directory in your project root.
 
 ---
 
-## Test Case Fields
+## 1. Folder Structure
+
+Here is the standard folder layout:
+
+```text
+your-project/
+├── zenitests/
+│   ├── web/
+│   │   ├── config.yaml               # Web configuration (browser, URLs, concurrency)
+│   │   ├── tc_login.yaml             # Web test case
+│   │   └── tc_checkout.yaml          # Web test case
+│   ├── ios/
+│   │   ├── config.yaml               # iOS configuration (device, bundlePath)
+│   │   └── tc_ios_checkout.yaml      # iOS mobile test case
+│   └── android/
+│       ├── config.yaml               # Android configuration (device, bundlePath)
+│       └── tc_android_checkout.yaml  # Android mobile test case
+├── secrets.yaml                      # Passwords and credentials (gitignored)
+└── ...
+```
+
+- **`web/`**: Contains browser tests and default web settings.
+- **`ios/`**: Contains iOS native app tests and default simulator/device settings.
+- **`android/`**: Contains Android native app tests and default emulator/device settings.
+- **`secrets.yaml`**: Stored at the project root (not inside `zenitests/`). Keeps passwords and tokens out of your test files.
+
+---
+
+## 2. Configuration Files (`config.yaml`)
+
+Each platform folder can contain a `config.yaml` file. This lets you set default options so you don't have to type command-line flags every time you run `zenitest run`.
+
+<Tabs>
+  <TabItem label="Web">
+    ```yaml
+    # Browser to use: chromium (default), chrome, firefox, or safari
+    browser: chromium
+
+    # Local dev server URL — used when running with --local
+    localURL: http://localhost:3000
+
+    # Production or staging URL — used when running with --prod (default)
+    prodURL: https://www.saucedemo.com
+
+    # How many tests to run at the same time (default: 5)
+    parallel: 2
+    ```
+  </TabItem>
+
+  <TabItem label="iOS">
+    ```yaml
+    # Path to your built iOS app — .app for Simulator, .ipa for device
+    bundlePath: build/Runner.ipa
+
+    # Target simulator or device name
+    device: iPhone 15 Pro
+
+    # How many tests to run at the same time (default: 1)
+    parallel: 1
+    ```
+  </TabItem>
+
+  <TabItem label="Android">
+    ```yaml
+    # Path to your built Android APK
+    bundlePath: build/app-debug.apk
+
+    # Target emulator or device name
+    device: Pixel 7
+
+    # How many tests to run at the same time (default: 1)
+    parallel: 1
+    ```
+  </TabItem>
+</Tabs>
+
+---
+
+## 3. Test Case File Structure
+
+Each test is a `.yaml` file containing basic metadata and a sequence of steps:
 
 ```yaml
-id: tc_unique_id               # Required: Unique test ID
-title: Human Readable Title    # Required: Brief summary
-localUrl: http://localhost:3000 # Optional: Local dev URL for web testing
-prodURL: https://example.com   # Target production URL for web testing
-expectedResult: Outcome text  # Required: Expected result
-variables:                     # Optional: Custom variables
-  user: alex
-steps:                         # Required: List of test actions
-  - navigate: /                # Required for web (omitted for mobile)
+id: tc_login                      # Unique ID for the test (snake_case)
+title: User Login Flow            # Plain English title
+priority: high                    # P0/P1/P2 or high/medium/low (optional)
+expectedResult: Dashboard is open # Expected outcome (recommended)
+
+steps:
+  - navigate: /login
+  - act: Type 'john_doe' into 'Username'
   - act: Click 'Sign In'
-  - validate: Verify dashboard is visible
+  - validate: Verify 'Dashboard' is visible
 ```
-
-> [!NOTE]
-> For **Mobile Tests** (iOS/Android), omit `prodURL`, `localUrl`, and `navigate` steps. The app binary (`.ipa` or `.apk`) specified via CLI is launched directly at session setup.
 
 ---
 
-## Basic Templates
+## 4. Test File Fields
 
-### Web Test (`zenitests/web/my_first_test.yaml`)
-
-```yaml
-id: tc_web_001
-title: Example Web Test
-localUrl: http://localhost:3000
-prodURL: https://example.com
-expectedResult: Page title is visible.
-
-steps:
-  - navigate: /
-  - validate: Verify 'Example Domain' heading is visible
-```
-
-### Mobile iOS Test (`zenitests/ios/my_ios_test.yaml`)
-
-```yaml
-id: tc_ios_001
-title: Example Mobile iOS Test
-expectedResult: Product card added to cart.
-
-steps:
-  - act: Tap the Add button on ZeniPods Pro
-  - validate: Cart badge displays 1
-```
+| Field | Description | Required? |
+| :--- | :--- | :--- |
+| `id` | Unique identifier (e.g. `tc_login`) | **Yes** |
+| `title` | Short summary describing the test | **Yes** |
+| `priority` | Importance level: `P0`, `P1`, `P2` or `high`, `medium`, `low` | Optional |
+| `variables` | Reusable variables referenced as `${varName}` | Optional |
+| `expectedResult` | Plain English description of expected outcome | Recommended |
+| `steps` | Ordered list of actions (`navigate`, `act`, `validate`) | **Yes** |

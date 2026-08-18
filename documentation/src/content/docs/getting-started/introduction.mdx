@@ -1,21 +1,29 @@
 ---
 title: Introduction
-description: Learn what ZeniTest does and why to use it.
+description: What is ZeniTest and how it makes testing easy.
 ---
 
-**ZeniTest** is an AI-powered automated testing tool. It lets you write end-to-end (E2E) tests for Web, Mobile iOS (`.ipa`), and Mobile Android (`.apk`) applications in simple YAML files using natural language instructions.
+**ZeniTest** lets you create automated tests for Web, iOS, and Android apps using simple plain English YAML files. 
 
-## Key Features
+Instead of writing complex code or maintaining fragile CSS selectors, you write what you want to do (like clicking a button or typing text), and ZeniTest's AI takes care of running and verifying it.
 
-- **Cross-Platform E2E Testing**: Automated testing for Web, iOS, and Android applications.
-- **No CSS/XPath Maintenance**: Describe taps, typing, or clicks in plain English.
-- **AI Visual Verification**: Verify page and screen content visually without complex assertions.
-- **Cloud & Local Device Execution**: Run mobile tests seamlessly on real cloud devices, simulators, or emulators.
-- **Built-in Secret Security**: Use `${secret.MY_KEY}` to keep credentials safe.
-- **Parallel & Multi-Platform Runs**: Execute test suites concurrently across platforms.
+---
 
-## How It Works
+## Why ZeniTest?
 
-1. **Write YAML**: Define your test scenario in `.yaml` files organized by platform inside `zenitests/` (`web/`, `ios/`, `android/`).
-2. **Run CLI**: Execute `zenitest run` in your terminal with your app binary or web settings.
-3. **Get Results**: The Zeni AI executes your steps and reports real-time visual results and logs.
+- **Plain English Tests**: Write test steps in simple sentences anyone can understand.
+- **One Tool for Web & Mobile**: Run tests on websites, iOS apps (`.ipa`), and Android apps (`.apk`).
+- **No Fragile Selectors**: No need to inspect elements or copy XPath/CSS selectors.
+- **AI Visual Checks**: Verify pages and screens visually, just like a human tester.
+- **Safe Secrets**: Keep passwords and private keys out of your test files.
+- **Fast CLI**: Run your tests directly from your terminal with a single command.
+
+---
+
+## How It Works in 3 Steps
+
+1. **Write a Test**: Create a `.yaml` file with the actions you want to take (`navigate`, `act`, `validate`).
+2. **Run the Command**: Run `zenitest run` in your terminal.
+3. **See Results**: View live pass/fail results right in your terminal.
+
+Ready to get started? Head over to the [Quickstart Guide](/getting-started/quickstart/) to run your first test in under 2 minutes!
