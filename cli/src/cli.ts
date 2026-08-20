@@ -1402,6 +1402,7 @@ function loadIosConfig(iosDir: string): {
         bundleId: options.bundleId,
         deviceName,
         secrets,
+        headless,
       });
 
       try {
@@ -1460,6 +1461,7 @@ function loadIosConfig(iosDir: string): {
           secrets,
           appiumPort: port,
           simulatorUdid: sim.udid,
+          headless,
         });
 
         try {
@@ -1479,7 +1481,7 @@ function loadIosConfig(iosDir: string): {
               testCases: partition,
               appFilePath: iosAppPath,
               bundleId: options.bundleId,
-              deviceName: sim.name,
+              deviceName,
               parallel: 1,
               executionId,
             }),

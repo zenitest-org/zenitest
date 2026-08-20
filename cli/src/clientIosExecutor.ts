@@ -72,6 +72,7 @@ export interface ClientIosExecutorOptions {
   secrets?: Record<string, string>;
   appiumPort?: number;
   simulatorUdid?: string;
+  headless?: boolean;
 }
 
 interface IosSessionState {
@@ -378,6 +379,7 @@ export class ClientIosExecutor {
   private isStopped: boolean = false;
   private appiumPort: number;
   private simulatorUdid?: string;
+  private headless: boolean;
 
   constructor(options: ClientIosExecutorOptions) {
     this.serverUrl = options.serverUrl;
@@ -388,6 +390,7 @@ export class ClientIosExecutor {
     this.secrets = options.secrets || {};
     this.appiumPort = options.appiumPort || 4723;
     this.simulatorUdid = options.simulatorUdid;
+    this.headless = options.headless || false;
   }
 
   public async start(): Promise<void> {
@@ -544,6 +547,8 @@ export class ClientIosExecutor {
       // Unique WDA ports per executor to prevent conflicts in parallel mode
       "appium:wdaLocalPort": 8100 + (this.appiumPort - 4723),
       "appium:mjpegServerPort": 9100 + (this.appiumPort - 4723),
+      // Headless mode: prevent Simulator.app GUI from opening
+      ...(this.headless ? { "appium:isHeadless": true } : {}),
     };
 
     if (targetDevice.udid) {
