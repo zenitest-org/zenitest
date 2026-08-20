@@ -2,8 +2,8 @@
 
 import pkg from "../package.json";
 import { ClientWebExecutor } from "./clientWebExecutor";
-import { ClientIosExecutor } from "./clientIosExecutor";
-import { ClientAndroidExecutor } from "./clientAndroidExecutor";
+import { ClientIosExecutor, getBootedSimulators, ensureBootedSimulators } from "./clientIosExecutor";
+import { ClientAndroidExecutor, getOnlineAndroidDevices, ensureAndroidEmulators } from "./clientAndroidExecutor";
 import {
   readdirSync,
   readFileSync,
@@ -1244,6 +1244,7 @@ function loadIosConfig(iosDir: string): {
   bundlePath?: string;
   device?: string;
   parallel?: number;
+  headless?: boolean;
 } {
   const possiblePaths = [
     join(iosDir, "config.yaml"),
@@ -1260,6 +1261,7 @@ function loadIosConfig(iosDir: string): {
             bundlePath: parsed.bundlePath || parsed.bundle || parsed.appPath || parsed.app,
             device: parsed.device || parsed.deviceName,
             parallel: parsed.parallel ? Number(parsed.parallel) : undefined,
+            headless: parsed.headless === true || parsed.headless === "true",
           };
         }
       } catch {}
@@ -1268,10 +1270,63 @@ function loadIosConfig(iosDir: string): {
   return {};
 }
 
+  // Helper: process an NDJSON response stream and update the renderer
+  const processStreamResponse = async (res: Response, testCasesForError: any[]) => {
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      const errMsg =
+        errData.error ||
+        errData.message ||
+        `Mobile execution failed with status ${res.status}`;
+      for (const tc of testCasesForError) {
+        renderer.completeTest(tc.id, "FAILED", 0, errMsg);
+      }
+    } else if (res.body) {
+      const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const msg = JSON.parse(trimmed);
+            if (msg.type === "init" && !executionId) {
+              executionId = msg.executionId;
+              renderer.setExecutionId(msg.executionId);
+            } else if (msg.type === "step_progress")
+              renderer.updateStep(
+                msg.testCaseId,
+                msg.stepIndex,
+                msg.totalSteps,
+                msg.stepType,
+                msg.description,
+              );
+            else if (msg.type === "test_complete")
+              renderer.completeTest(
+                msg.testCaseId,
+                msg.status,
+                msg.durationMs,
+                msg.error,
+              );
+            else if (msg.type === "execution_complete") {
+              if (msg.failedCount > 0) exitCode = 1;
+            }
+          } catch {}
+        }
+      }
+    }
+  };
+
   // 2. Mobile iOS Tests Task
   const runIos = async () => {
     if (iosTestCases.length === 0) return;
-    const clientId = `client_ios_${crypto.randomUUID()}`;
     const secrets = loadLocalSecrets(dirPath);
     const iosConfig = iosDir && existsSync(iosDir) ? loadIosConfig(iosDir) : {};
 
@@ -1299,114 +1354,160 @@ function loadIosConfig(iosDir: string): {
       iosConfig.device ||
       undefined;
 
-    const parallelCount =
+    const requestedParallel = Number(
       options.parallel ||
       options.p ||
       iosConfig.parallel ||
-      1;
+      1,
+    );
 
-    const client = new ClientIosExecutor({
-      serverUrl: WS_BASE_URL,
-      clientId,
-      appFilePath: iosAppPath,
-      bundleId: options.bundleId,
-      deviceName,
-      secrets,
+    const headless = options.headless || iosConfig.headless || false;
+
+    // In headless mode, close the Simulator GUI so no windows appear
+    if (headless) {
+      try {
+        execSync('killall "Simulator" 2>/dev/null || true', {
+          stdio: ["ignore", "ignore", "ignore"],
+        });
+      } catch (_) {}
+    }
+
+    // Inject local secrets into test case variables
+    const injectedIosTestCases = iosTestCases.map((tc) => {
+      const mergedVariables = { ...(tc.variables || {}) };
+      for (const [secKey, secVal] of Object.entries(secrets)) {
+        mergedVariables[`secret.${secKey}`] = secVal;
+      }
+      return {
+        ...tc,
+        variables: mergedVariables,
+      };
     });
 
+    // Determine how many parallel executors to use; auto-provision simulators if needed
+    const desiredParallel = Math.max(1, Math.min(requestedParallel, iosTestCases.length));
+    const { simulators: bootedSims, cleanup: cleanupSimulators } = desiredParallel > 1
+      ? ensureBootedSimulators(desiredParallel, deviceName)
+      : { simulators: getBootedSimulators(), cleanup: () => {} };
+    const effectiveParallel = Math.max(1, Math.min(desiredParallel, bootedSims.length || 1));
+
     try {
-      await client.start();
-
-      // Inject local secrets into test case variables
-      const injectedIosTestCases = iosTestCases.map((tc) => {
-        const mergedVariables = { ...(tc.variables || {}) };
-        for (const [secKey, secVal] of Object.entries(secrets)) {
-          mergedVariables[`secret.${secKey}`] = secVal;
-        }
-        return {
-          ...tc,
-          variables: mergedVariables,
-        };
+    if (effectiveParallel <= 1 || bootedSims.length <= 1) {
+      // Single executor path (original behavior)
+      const clientId = `client_ios_${crypto.randomUUID()}`;
+      const client = new ClientIosExecutor({
+        serverUrl: WS_BASE_URL,
+        clientId,
+        appFilePath: iosAppPath,
+        bundleId: options.bundleId,
+        deviceName,
+        secrets,
       });
 
-      const res = await fetch(`${API_BASE_URL}/api/executions/mobile`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          Authorization: `Bearer ${apiKey}`,
-          "x-stream": "true",
-          "x-client-id": clientId,
-        },
-        body: JSON.stringify({
-          clientId,
-          platform: "ios",
-          testCases: injectedIosTestCases,
-          appFilePath: iosAppPath,
-          bundleId: options.bundleId,
-          deviceName,
-          parallel: parallelCount,
-          executionId,
-        }),
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        const errMsg =
-          errData.error ||
-          errData.message ||
-          `Mobile iOS execution failed with status ${res.status}`;
+      try {
+        await client.start();
+        const res = await fetch(`${API_BASE_URL}/api/executions/mobile`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+            Authorization: `Bearer ${apiKey}`,
+            "x-stream": "true",
+            "x-client-id": clientId,
+          },
+          body: JSON.stringify({
+            clientId,
+            platform: "ios",
+            testCases: injectedIosTestCases,
+            appFilePath: iosAppPath,
+            bundleId: options.bundleId,
+            deviceName,
+            parallel: 1,
+            executionId,
+          }),
+        });
+        await processStreamResponse(res, iosTestCases);
+      } catch (err: any) {
+        const errMsg = err.message || "Failed to execute iOS tests";
         for (const tc of iosTestCases) {
           renderer.completeTest(tc.id, "FAILED", 0, errMsg);
         }
-      } else if (res.body) {
-        const reader = (res.body as ReadableStream<Uint8Array>).getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
+      } finally {
+        await client.stop();
+      }
+    } else {
+      // Parallel executor path: spawn N executors, each on a unique Appium port + simulator
+      const BASE_IOS_PORT = 4723;
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            try {
-              const msg = JSON.parse(trimmed);
-              if (msg.type === "init" && !executionId) {
-                executionId = msg.executionId;
-                renderer.setExecutionId(msg.executionId);
-              } else if (msg.type === "step_progress")
-                renderer.updateStep(
-                  msg.testCaseId,
-                  msg.stepIndex,
-                  msg.totalSteps,
-                  msg.stepType,
-                  msg.description,
-                );
-              else if (msg.type === "test_complete")
-                renderer.completeTest(
-                  msg.testCaseId,
-                  msg.status,
-                  msg.durationMs,
-                  msg.error,
-                );
-              else if (msg.type === "execution_complete") {
-                if (msg.failedCount > 0) exitCode = 1;
-              }
-            } catch {}
+      // Partition test cases round-robin across executors
+      const partitions: any[][] = Array.from({ length: effectiveParallel }, () => []);
+      for (let i = 0; i < injectedIosTestCases.length; i++) {
+        partitions[i % effectiveParallel].push(injectedIosTestCases[i]);
+      }
+
+      const executorTasks = partitions.map(async (partition, idx) => {
+        if (partition.length === 0) return;
+        const port = BASE_IOS_PORT + idx;
+        const sim = bootedSims[idx];
+        const clientId = `client_ios_${idx}_${crypto.randomUUID()}`;
+
+        const client = new ClientIosExecutor({
+          serverUrl: WS_BASE_URL,
+          clientId,
+          appFilePath: iosAppPath,
+          bundleId: options.bundleId,
+          deviceName,
+          secrets,
+          appiumPort: port,
+          simulatorUdid: sim.udid,
+        });
+
+        try {
+          await client.start();
+          const res = await fetch(`${API_BASE_URL}/api/executions/mobile`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": apiKey,
+              Authorization: `Bearer ${apiKey}`,
+              "x-stream": "true",
+              "x-client-id": clientId,
+            },
+            body: JSON.stringify({
+              clientId,
+              platform: "ios",
+              testCases: partition,
+              appFilePath: iosAppPath,
+              bundleId: options.bundleId,
+              deviceName: sim.name,
+              parallel: 1,
+              executionId,
+            }),
+          });
+          await processStreamResponse(res, partition);
+        } catch (err: any) {
+          const errMsg = err.message || "Failed to execute iOS tests";
+          for (const tc of partition) {
+            renderer.completeTest(tc.id, "FAILED", 0, errMsg);
           }
+        } finally {
+          await client.stop();
         }
-      }
-    } catch (err: any) {
-      const errMsg = err.message || "Failed to execute iOS tests";
-      for (const tc of iosTestCases) {
-        renderer.completeTest(tc.id, "FAILED", 0, errMsg);
-      }
+      });
+
+      await Promise.all(executorTasks);
+    }
     } finally {
-      await client.stop();
+      // Clean up any cloned simulators and shut down provisioned ones
+      cleanupSimulators();
+      // In headless mode, also close the Simulator GUI if it was opened by Appium
+      if (headless) {
+        try {
+          execSync('killall "Simulator" 2>/dev/null || true', {
+            stdio: ["ignore", "ignore", "ignore"],
+          });
+        } catch (_) {}
+      }
     }
   };
 
@@ -1414,6 +1515,7 @@ function loadAndroidConfig(androidDir: string): {
   bundlePath?: string;
   device?: string;
   parallel?: number;
+  headless?: boolean;
 } {
   const possiblePaths = [
     join(androidDir, "config.yaml"),
@@ -1435,6 +1537,7 @@ function loadAndroidConfig(androidDir: string): {
               parsed.apkPath,
             device: parsed.device || parsed.deviceName,
             parallel: parsed.parallel ? Number(parsed.parallel) : undefined,
+            headless: parsed.headless === true || parsed.headless === "true",
           };
         }
       } catch {}
@@ -1446,7 +1549,6 @@ function loadAndroidConfig(androidDir: string): {
   // 3. Mobile Android Tests Task
   const runAndroid = async () => {
     if (androidTestCases.length === 0) return;
-    const clientId = `client_android_${crypto.randomUUID()}`;
     const secrets = loadLocalSecrets(dirPath);
     const androidConfig =
       androidDir && existsSync(androidDir) ? loadAndroidConfig(androidDir) : {};
@@ -1478,116 +1580,146 @@ function loadAndroidConfig(androidDir: string): {
       androidConfig.device ||
       undefined;
 
-    const parallelCount =
+    const requestedParallel = Number(
       options.parallel ||
       options.p ||
       androidConfig.parallel ||
-      1;
+      1,
+    );
 
-    const client = new ClientAndroidExecutor({
-      serverUrl: WS_BASE_URL,
-      clientId,
-      appFilePath: androidAppPath,
-      appPackage: options.appPackage,
-      appActivity: options.appActivity,
-      deviceName,
-      secrets,
+    const headless = options.headless || androidConfig.headless || false;
+
+    // Inject local secrets into test case variables
+    const injectedAndroidTestCases = androidTestCases.map((tc) => {
+      const mergedVariables = { ...(tc.variables || {}) };
+      for (const [secKey, secVal] of Object.entries(secrets)) {
+        mergedVariables[`secret.${secKey}`] = secVal;
+      }
+      return {
+        ...tc,
+        variables: mergedVariables,
+      };
     });
 
-    try {
-      await client.start();
+    // Determine how many parallel executors to use; auto-provision emulators if needed
+    const desiredParallel = Math.max(1, Math.min(requestedParallel, androidTestCases.length));
+    const { devices: onlineDevices, cleanup: cleanupEmulators } =
+      ensureAndroidEmulators(desiredParallel, { headless, avdName: deviceName });
+    const effectiveParallel = Math.max(1, Math.min(desiredParallel, onlineDevices.length || 1));
 
-      // Inject local secrets into test case variables
-      const injectedAndroidTestCases = androidTestCases.map((tc) => {
-        const mergedVariables = { ...(tc.variables || {}) };
-        for (const [secKey, secVal] of Object.entries(secrets)) {
-          mergedVariables[`secret.${secKey}`] = secVal;
-        }
-        return {
-          ...tc,
-          variables: mergedVariables,
-        };
+    try {
+    if (effectiveParallel <= 1 || onlineDevices.length <= 1) {
+      // Single executor path (original behavior)
+      const clientId = `client_android_${crypto.randomUUID()}`;
+      const client = new ClientAndroidExecutor({
+        serverUrl: WS_BASE_URL,
+        clientId,
+        appFilePath: androidAppPath,
+        appPackage: options.appPackage,
+        appActivity: options.appActivity,
+        deviceName,
+        secrets,
       });
 
-      const res = await fetch(`${API_BASE_URL}/api/executions/mobile`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          Authorization: `Bearer ${apiKey}`,
-          "x-stream": "true",
-          "x-client-id": clientId,
-        },
-        body: JSON.stringify({
+      try {
+        await client.start();
+        const res = await fetch(`${API_BASE_URL}/api/executions/mobile`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+            Authorization: `Bearer ${apiKey}`,
+            "x-stream": "true",
+            "x-client-id": clientId,
+          },
+          body: JSON.stringify({
+            clientId,
+            platform: "android",
+            testCases: injectedAndroidTestCases,
+            appFilePath: androidAppPath,
+            appPackage: options.appPackage,
+            appActivity: options.appActivity,
+            deviceName,
+            parallel: 1,
+            executionId,
+          }),
+        });
+        await processStreamResponse(res, androidTestCases);
+      } catch (err: any) {
+        const errMsg = err.message || "Failed to execute Android tests";
+        for (const tc of androidTestCases) {
+          renderer.completeTest(tc.id, "FAILED", 0, errMsg);
+        }
+      } finally {
+        await client.stop();
+      }
+    } else {
+      // Parallel executor path: spawn N executors, each on a unique Appium port + device
+      const BASE_ANDROID_PORT = 4823;
+
+      // Partition test cases round-robin across executors
+      const partitions: any[][] = Array.from({ length: effectiveParallel }, () => []);
+      for (let i = 0; i < injectedAndroidTestCases.length; i++) {
+        partitions[i % effectiveParallel].push(injectedAndroidTestCases[i]);
+      }
+
+      const executorTasks = partitions.map(async (partition, idx) => {
+        if (partition.length === 0) return;
+        const port = BASE_ANDROID_PORT + idx;
+        const device = onlineDevices[idx];
+        const clientId = `client_android_${idx}_${crypto.randomUUID()}`;
+
+        const client = new ClientAndroidExecutor({
+          serverUrl: WS_BASE_URL,
           clientId,
-          platform: "android",
-          testCases: injectedAndroidTestCases,
           appFilePath: androidAppPath,
           appPackage: options.appPackage,
           appActivity: options.appActivity,
           deviceName,
-          parallel: parallelCount,
-          executionId,
-        }),
+          secrets,
+          appiumPort: port,
+          emulatorSerial: device.serial,
+        });
+
+        try {
+          await client.start();
+          const res = await fetch(`${API_BASE_URL}/api/executions/mobile`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "x-api-key": apiKey,
+              Authorization: `Bearer ${apiKey}`,
+              "x-stream": "true",
+              "x-client-id": clientId,
+            },
+            body: JSON.stringify({
+              clientId,
+              platform: "android",
+              testCases: partition,
+              appFilePath: androidAppPath,
+              appPackage: options.appPackage,
+              appActivity: options.appActivity,
+              deviceName: device.model,
+              parallel: 1,
+              executionId,
+            }),
+          });
+          await processStreamResponse(res, partition);
+        } catch (err: any) {
+          const errMsg = err.message || "Failed to execute Android tests";
+          for (const tc of partition) {
+            renderer.completeTest(tc.id, "FAILED", 0, errMsg);
+          }
+        } finally {
+          await client.stop();
+        }
       });
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        const errMsg =
-          errData.error ||
-          errData.message ||
-          `Mobile Android execution failed with status ${res.status}`;
-        for (const tc of androidTestCases) {
-          renderer.completeTest(tc.id, "FAILED", 0, errMsg);
-        }
-      } else if (res.body) {
-        const reader = (res.body as ReadableStream<Uint8Array>).getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split("\n");
-          buffer = lines.pop() || "";
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed) continue;
-            try {
-              const msg = JSON.parse(trimmed);
-              if (msg.type === "init" && !executionId) {
-                executionId = msg.executionId;
-                renderer.setExecutionId(msg.executionId);
-              } else if (msg.type === "step_progress")
-                renderer.updateStep(
-                  msg.testCaseId,
-                  msg.stepIndex,
-                  msg.totalSteps,
-                  msg.stepType,
-                  msg.description,
-                );
-              else if (msg.type === "test_complete")
-                renderer.completeTest(
-                  msg.testCaseId,
-                  msg.status,
-                  msg.durationMs,
-                  msg.error,
-                );
-              else if (msg.type === "execution_complete") {
-                if (msg.failedCount > 0) exitCode = 1;
-              }
-            } catch {}
-          }
-        }
-      }
-    } catch (err: any) {
-      const errMsg = err.message || "Failed to execute Android tests";
-      for (const tc of androidTestCases) {
-        renderer.completeTest(tc.id, "FAILED", 0, errMsg);
-      }
+      await Promise.all(executorTasks);
+    }
     } finally {
-      await client.stop();
+      // Clean up: shut down any emulators we launched
+      cleanupEmulators();
     }
   };
 

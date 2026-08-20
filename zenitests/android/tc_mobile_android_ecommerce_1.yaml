@@ -1,0 +1,12 @@
+id: tc_mobile_android_ecommerce_1
+title: ZeniShop Mobile Android Checkout Workflow
+priority: P0
+expectedResult: Item added to cart and checkout completed successfully on Android device
+
+steps:
+  - act: Tap the Add button on the ZeniPods Pro Wireless product card
+  - validate: Cart badge displays 1
+  - act: Tap the Cart icon to open the cart sheet drawer
+  - validate: Your Cart header and Proceed to Checkout button are displayed
+  - act: Tap the Proceed to Checkout button
+  - validate: Order Placed Successfully! text and Continue Shopping button are displayed

@@ -1,4 +1,5 @@
 # Android Mobile Testing Configuration
 bundlePath: sample-apps/flutter_sample_app/build/app/outputs/flutter-apk/app-debug.apk
 device: Pixel 7
-parallel: 1
+parallel: 2
+headless: true

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@clerk/nextjs";
 import {
@@ -555,6 +555,22 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
     screenshots.length > 0 ? screenshots.length - 1 : 0,
   );
   const currentShot = screenshots[screenshotIndex];
+  const [imageLoaded, setImageLoaded] = useState(false);
+
+  // Preload all screenshot images into browser cache on mount
+  useEffect(() => {
+    screenshots.forEach((shot) => {
+      if (shot.url) {
+        const img = new Image();
+        img.src = shot.url;
+      }
+    });
+  }, [tc.id]);
+
+  // Reset loaded state when screenshot index changes
+  useEffect(() => {
+    setImageLoaded(false);
+  }, [screenshotIndex]);
 
   const prevShot = () => setScreenshotIndex((i) => Math.max(0, i - 1));
   const nextShot = () =>
@@ -1042,14 +1058,18 @@ function TestCaseDetail({ tc }: { tc: TestCaseData }) {
             <div className="relative w-full h-full min-h-[300px] flex items-center justify-center select-none">
               {currentShot.url ? (
                 <img
+                  key={currentShot.id}
                   src={currentShot.url}
                   alt={currentShot.title}
+                  onLoad={() => setImageLoaded(true)}
                   className={cn(
+                    "transition-opacity duration-150",
+                    imageLoaded ? "opacity-100" : "opacity-0",
                     (tc.info?.platform || tc.platform || "").toLowerCase() ===
                       "ios" ||
                       (tc.info?.platform || tc.platform || "").toLowerCase() ===
                         "android"
-                      ? "max-h-[460px] w-auto max-w-[260px] sm:max-w-[300px] object-contain rounded-2xl border border-border/60 shadow-lg my-2 transition-all"
+                      ? "max-h-[460px] w-auto max-w-[260px] sm:max-w-[300px] object-contain rounded-2xl border border-border/60 shadow-lg my-2"
                       : "w-full max-w-full max-h-[500px] object-contain rounded-none border-none shadow-none",
                   )}
                 />

@@ -43,6 +43,8 @@ export interface ClientAndroidExecutorOptions {
   appActivity?: string;
   deviceName?: string;
   secrets?: Record<string, string>;
+  appiumPort?: number;
+  emulatorSerial?: string;
 }
 
 interface AndroidSessionState {
@@ -102,8 +104,21 @@ function getConnectedAndroidDevices(): {
 
         const modelMatch = trimmed.match(/model:([^\s]+)/i);
         const productMatch = trimmed.match(/product:([^\s]+)/i);
-        const model = modelMatch ? modelMatch[1].replace(/_/g, " ") : serial;
+        let model = modelMatch ? modelMatch[1].replace(/_/g, " ") : serial;
         const product = productMatch ? productMatch[1] : "";
+
+        // For emulators, resolve the AVD name for a human-readable device name
+        if (serial.startsWith("emulator-") && state === "device") {
+          try {
+            const avdName = execSync(
+              `${adb} -s ${serial} emu avd name 2>/dev/null | head -1`,
+              { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"], timeout: 3000 },
+            ).trim();
+            if (avdName && !avdName.startsWith("KO:")) {
+              model = avdName.replace(/_/g, " ");
+            }
+          } catch (_) {}
+        }
 
         devices.push({ serial, model, product, state });
       }
@@ -114,10 +129,167 @@ function getConnectedAndroidDevices(): {
   }
 }
 
-function resolveAndroidDevice(requestedName?: string): {
+/**
+ * Returns all online (state === "device") Android devices/emulators.
+ * Used by cli.ts to determine the available pool for parallel execution.
+ */
+export function getOnlineAndroidDevices(): { serial: string; model: string }[] {
+  return getConnectedAndroidDevices()
+    .filter((d) => d.state === "device")
+    .map(({ serial, model }) => ({ serial, model }));
+}
+
+function getEmulatorPath(): string {
+  const androidHome =
+    process.env.ANDROID_HOME ||
+    process.env.ANDROID_SDK_ROOT ||
+    join(process.env.HOME || "", "Library/Android/sdk");
+  const emulatorPath = join(androidHome, "emulator/emulator");
+  if (existsSync(emulatorPath)) return emulatorPath;
+  return "emulator";
+}
+
+function getAvailableAvds(): string[] {
+  try {
+    const emulator = getEmulatorPath();
+    const output = execSync(`${emulator} -list-avds`, {
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return output
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Ensures at least `count` Android emulators are online for parallel execution.
+ * If fewer are available, launches additional emulators from available AVDs.
+ *
+ * Returns the list of online devices and a cleanup function that shuts down
+ * any emulators that were launched by this call.
+ */
+export function ensureAndroidEmulators(
+  count: number,
+  options?: { headless?: boolean; avdName?: string },
+): { devices: { serial: string; model: string }[]; cleanup: () => void } {
+  const launchedProcesses: ChildProcess[] = [];
+  const launchedSerials: string[] = [];
+
+  // Check if we already have enough
+  let online = getOnlineAndroidDevices();
+  if (online.length >= count) {
+    return { devices: online.slice(0, count), cleanup: () => {} };
+  }
+
+  const avds = getAvailableAvds();
+  if (avds.length === 0) {
+    return { devices: online, cleanup: () => {} };
+  }
+
+  // Pick which AVD to launch: prefer matching name, then first available
+  let targetAvd = options?.avdName
+    ? avds.find((a) => a.toLowerCase().replace(/[-_]/g, " ").includes(options.avdName!.toLowerCase().replace(/[-_]/g, " ")))
+    : undefined;
+  if (!targetAvd) targetAvd = avds[0];
+
+  const needed = count - online.length;
+  const emulator = getEmulatorPath();
+  // When launching multiple instances of the same AVD, ALL must use -read-only
+  const useReadOnly = needed > 1 || online.length > 0;
+
+  for (let i = 0; i < needed; i++) {
+    const headlessFlags = options?.headless ? "-no-window -no-audio -no-boot-anim" : "-no-audio -no-boot-anim";
+    const readOnlyFlag = useReadOnly ? "-read-only" : "";
+    const cmd = `${emulator} -avd ${targetAvd} ${headlessFlags} ${readOnlyFlag}`.replace(/\s+/g, " ").trim();
+
+    try {
+      const proc = spawn(cmd, {
+        shell: true,
+        stdio: ["ignore", "ignore", "ignore"],
+        detached: true,
+      });
+      proc.unref();
+      launchedProcesses.push(proc);
+      // Brief delay between launches to avoid race conditions on the AVD lock
+      if (i < needed - 1) {
+        execSync("sleep 2", { stdio: ["ignore", "ignore", "ignore"] });
+      }
+    } catch (_) {
+      break;
+    }
+  }
+
+  if (launchedProcesses.length === 0) {
+    return { devices: online, cleanup: () => {} };
+  }
+
+  // Wait for emulators to come online (up to 60s)
+  const adb = getAdbPath();
+  const startTime = Date.now();
+  while (Date.now() - startTime < 60000) {
+    online = getOnlineAndroidDevices();
+    if (online.length >= count) break;
+    try {
+      execSync("sleep 3", { stdio: ["ignore", "ignore", "ignore"] });
+    } catch (_) {}
+  }
+
+  // Wait for boot to complete on new devices
+  const finalOnline = getOnlineAndroidDevices();
+  const previousSerials = new Set(online.slice(0, online.length - launchedProcesses.length).map((d) => d.serial));
+  for (const d of finalOnline) {
+    if (!previousSerials.has(d.serial)) {
+      launchedSerials.push(d.serial);
+      // Wait for device to finish booting
+      try {
+        execSync(`${adb} -s ${d.serial} wait-for-device shell getprop sys.boot_completed`, {
+          encoding: "utf-8",
+          stdio: ["ignore", "pipe", "ignore"],
+          timeout: 30000,
+        });
+      } catch (_) {}
+    }
+  }
+
+  const cleanup = () => {
+    // Shut down emulators we launched
+    for (const serial of launchedSerials) {
+      try {
+        execSync(`${adb} -s ${serial} emu kill`, {
+          stdio: ["ignore", "ignore", "ignore"],
+          timeout: 10000,
+        });
+      } catch (_) {}
+    }
+    // Kill any emulator processes we spawned
+    for (const proc of launchedProcesses) {
+      try {
+        proc.kill("SIGTERM");
+      } catch (_) {}
+    }
+  };
+
+  return { devices: finalOnline.slice(0, count), cleanup };
+}
+
+function resolveAndroidDevice(requestedName?: string, forceSerial?: string): {
   udid?: string;
   name: string;
 } {
+  // If a specific serial is forced (for parallel execution), use it directly
+  if (forceSerial) {
+    const devices = getConnectedAndroidDevices();
+    const match = devices.find((d) => d.serial === forceSerial);
+    if (match) {
+      return { udid: match.serial, name: match.model };
+    }
+    return { udid: forceSerial, name: requestedName || "Android Device" };
+  }
+
   const devices = getConnectedAndroidDevices();
   const onlineDevices = devices.filter((d) => d.state === "device");
 
@@ -312,6 +484,8 @@ export class ClientAndroidExecutor {
   private appiumProcess: ChildProcess | null = null;
   private sessions = new Map<string, AndroidSessionState>();
   private isStopped: boolean = false;
+  private appiumPort: number;
+  private emulatorSerial?: string;
 
   constructor(options: ClientAndroidExecutorOptions) {
     this.serverUrl = options.serverUrl;
@@ -322,6 +496,8 @@ export class ClientAndroidExecutor {
       options.appActivity || "com.example.flutter_sample_app.MainActivity";
     this.deviceName = options.deviceName;
     this.secrets = options.secrets || {};
+    this.appiumPort = options.appiumPort || 4723;
+    this.emulatorSerial = options.emulatorSerial;
   }
 
   public async start(): Promise<void> {
@@ -331,7 +507,7 @@ export class ClientAndroidExecutor {
 
   private async isAppiumRunning(): Promise<boolean> {
     try {
-      const res = await fetch("http://127.0.0.1:4723/status", {
+      const res = await fetch(`http://127.0.0.1:${this.appiumPort}/status`, {
         signal: AbortSignal.timeout(2000),
       });
       return res.ok;
@@ -345,7 +521,7 @@ export class ClientAndroidExecutor {
     const javaHome = ensureJavaHomeEnv();
     if (await this.isAppiumRunning()) return;
 
-    const spawnCmd = "npx -y appium --port 4723 --address 127.0.0.1";
+    const spawnCmd = `npx -y appium --port ${this.appiumPort} --address 127.0.0.1`;
     this.appiumProcess = spawn(spawnCmd, {
       shell: true,
       env: {
@@ -366,7 +542,7 @@ export class ClientAndroidExecutor {
 
     if (!(await this.isAppiumRunning())) {
       throw new Error(
-        "Failed to start local Appium server at http://127.0.0.1:4723 after 30s",
+        `Failed to start local Appium server at http://127.0.0.1:${this.appiumPort} after 30s`,
       );
     }
   }
@@ -464,7 +640,7 @@ export class ClientAndroidExecutor {
     appPath?: string,
   ): Promise<AndroidSessionState> {
     const targetApp = this.resolveTargetAppPath(appPath);
-    const targetDevice = resolveAndroidDevice(this.deviceName);
+    const targetDevice = resolveAndroidDevice(this.deviceName, this.emulatorSerial);
 
     const onlineDevices = getConnectedAndroidDevices().filter(
       (d) => d.state === "device",
@@ -498,7 +674,7 @@ export class ClientAndroidExecutor {
 
     const driver = await remote({
       hostname: "127.0.0.1",
-      port: 4723,
+      port: this.appiumPort,
       logLevel: "silent",
       capabilities,
     });
@@ -774,7 +950,9 @@ export class ClientAndroidExecutor {
     if (this.appPackage) {
       try {
         const adb = getAdbPath();
-        execSync(`${adb} shell am force-stop ${this.appPackage}`, {
+        // Target the specific emulator if we have a serial, otherwise default
+        const serialFlag = this.emulatorSerial ? `-s ${this.emulatorSerial} ` : "";
+        execSync(`${adb} ${serialFlag}shell am force-stop ${this.appPackage}`, {
           stdio: ["ignore", "ignore", "ignore"],
         });
       } catch (_) {}
@@ -800,7 +978,8 @@ export class ClientAndroidExecutor {
     if (this.appPackage) {
       try {
         const adb = getAdbPath();
-        execSync(`${adb} shell am force-stop ${this.appPackage}`, {
+        const serialFlag = this.emulatorSerial ? `-s ${this.emulatorSerial} ` : "";
+        execSync(`${adb} ${serialFlag}shell am force-stop ${this.appPackage}`, {
           stdio: ["ignore", "ignore", "ignore"],
         });
       } catch (_) {}

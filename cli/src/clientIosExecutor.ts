@@ -70,6 +70,8 @@ export interface ClientIosExecutorOptions {
   bundleId?: string;
   deviceName?: string;
   secrets?: Record<string, string>;
+  appiumPort?: number;
+  simulatorUdid?: string;
 }
 
 interface IosSessionState {
@@ -186,7 +188,154 @@ function getAvailableSimulators(): { name: string; udid: string; state: string }
   }
 }
 
-function resolveSimulatorDevice(requestedName?: string): { udid?: string; name: string } {
+/**
+ * Returns all currently booted iOS simulators.
+ * Used by cli.ts to determine the available pool for parallel execution.
+ */
+export function getBootedSimulators(): { name: string; udid: string }[] {
+  return getAvailableSimulators()
+    .filter((d) => d.state.toLowerCase() === "booted")
+    .map(({ name, udid }) => ({ name, udid }));
+}
+/**
+ * Ensures at least `count` iOS simulators are booted for parallel execution.
+ * If fewer are available, clones a shutdown simulator and boots all of them.
+ *
+ * IMPORTANT: `xcrun simctl clone` only works on shutdown simulators.
+ * So we find a shutdown source, clone it, then boot everything.
+ *
+ * Returns the list of booted simulators and a cleanup function that shuts down
+ * and deletes any simulators that were created by this call.
+ */
+export function ensureBootedSimulators(
+  count: number,
+  templateName?: string,
+): { simulators: { name: string; udid: string }[]; cleanup: () => void } {
+  const clonedUdids: string[] = [];
+
+  // Check if we already have enough booted
+  let booted = getBootedSimulators();
+  if (booted.length >= count) {
+    return { simulators: booted.slice(0, count), cleanup: () => {} };
+  }
+
+  // Find a source simulator to clone from (must be shutdown — clone fails on booted devices)
+  const all = getAvailableSimulators();
+  const shutdownDevices = all.filter((d) => d.state.toLowerCase() === "shutdown");
+
+  // Pick a source: prefer exact name match, then substring match, then any iPhone, then first available
+  let source = templateName
+    ? shutdownDevices.find((d) => d.name.toLowerCase() === templateName.toLowerCase())
+      || shutdownDevices.find((d) => d.name.toLowerCase().includes(templateName.toLowerCase()))
+    : undefined;
+  if (!source) {
+    source = shutdownDevices.find((d) => d.name.toLowerCase().startsWith("iphone"));
+  }
+  if (!source && shutdownDevices.length > 0) {
+    source = shutdownDevices[0];
+  }
+
+  if (!source) {
+    // No shutdown simulators available to clone — just boot what we can
+    if (booted.length === 0 && all.length > 0) {
+      try {
+        execSync(`xcrun simctl boot "${all[0].udid}"`, {
+          stdio: ["ignore", "ignore", "ignore"],
+        });
+        execSync("sleep 2", { stdio: ["ignore", "ignore", "ignore"] });
+      } catch (_) {}
+      booted = getBootedSimulators();
+    }
+    return { simulators: booted, cleanup: () => {} };
+  }
+
+  // Determine how many clones we need.
+  // We'll use the source itself as simulator #1, then clone for the rest.
+  const alreadyBooted = booted.length;
+  // The source counts as one if it isn't already booted
+  const sourceIsBooted = booted.some((b) => b.udid === source!.udid);
+  const simsFromSource = sourceIsBooted ? 0 : 1; // source will be booted as #1
+  const needed = count - alreadyBooted - simsFromSource;
+
+  // Clone the source (while it's still shutdown) for each additional sim needed
+  for (let i = 0; i < needed; i++) {
+    const cloneName = `${source.name} (ZeniTest ${i + 2})`;
+    try {
+      const cloneOutput = execSync(
+        `xcrun simctl clone "${source.udid}" "${cloneName}"`,
+        { encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] },
+      ).trim();
+
+      // The output is the new UDID
+      if (cloneOutput && cloneOutput.match(/^[A-F0-9\-]{36}$/i)) {
+        clonedUdids.push(cloneOutput);
+      }
+    } catch (_) {
+      // If cloning fails, work with what we have
+      break;
+    }
+  }
+
+  // Now boot the source (if not already booted) and all clones
+  if (!sourceIsBooted) {
+    try {
+      execSync(`xcrun simctl boot "${source.udid}"`, {
+        stdio: ["ignore", "ignore", "ignore"],
+      });
+    } catch (_) {}
+  }
+
+  for (const udid of clonedUdids) {
+    try {
+      execSync(`xcrun simctl boot "${udid}"`, {
+        stdio: ["ignore", "ignore", "ignore"],
+      });
+    } catch (_) {}
+  }
+
+  // Wait for all simulators to finish booting
+  execSync("sleep 5", { stdio: ["ignore", "ignore", "ignore"] });
+
+  const finalBooted = getBootedSimulators();
+
+  const cleanup = () => {
+    // Shut down and delete cloned simulators
+    for (const udid of clonedUdids) {
+      try {
+        execSync(`xcrun simctl shutdown "${udid}"`, {
+          stdio: ["ignore", "ignore", "ignore"],
+        });
+      } catch (_) {}
+      try {
+        execSync(`xcrun simctl delete "${udid}"`, {
+          stdio: ["ignore", "ignore", "ignore"],
+        });
+      } catch (_) {}
+    }
+    // Shut down the source simulator (but don't delete it)
+    if (!sourceIsBooted && source) {
+      try {
+        execSync(`xcrun simctl shutdown "${source.udid}"`, {
+          stdio: ["ignore", "ignore", "ignore"],
+        });
+      } catch (_) {}
+    }
+  };
+
+  return { simulators: finalBooted.slice(0, count), cleanup };
+}
+
+function resolveSimulatorDevice(requestedName?: string, forceUdid?: string): { udid?: string; name: string } {
+  // If a specific UDID is forced (for parallel execution), use it directly
+  if (forceUdid) {
+    const devices = getAvailableSimulators();
+    const match = devices.find((d) => d.udid === forceUdid);
+    if (match) {
+      return { udid: match.udid, name: match.name };
+    }
+    return { udid: forceUdid, name: requestedName || "iPhone" };
+  }
+
   const devices = getAvailableSimulators();
   const booted = devices.find((d) => d.state.toLowerCase() === "booted");
   if (booted) {
@@ -227,6 +376,8 @@ export class ClientIosExecutor {
   private appiumProcess: ChildProcess | null = null;
   private sessions = new Map<string, IosSessionState>();
   private isStopped: boolean = false;
+  private appiumPort: number;
+  private simulatorUdid?: string;
 
   constructor(options: ClientIosExecutorOptions) {
     this.serverUrl = options.serverUrl;
@@ -235,6 +386,8 @@ export class ClientIosExecutor {
     this.bundleId = options.bundleId;
     this.deviceName = options.deviceName;
     this.secrets = options.secrets || {};
+    this.appiumPort = options.appiumPort || 4723;
+    this.simulatorUdid = options.simulatorUdid;
   }
 
   public async start(): Promise<void> {
@@ -244,7 +397,7 @@ export class ClientIosExecutor {
 
   private async isAppiumRunning(): Promise<boolean> {
     try {
-      const res = await fetch("http://127.0.0.1:4723/status", {
+      const res = await fetch(`http://127.0.0.1:${this.appiumPort}/status`, {
         signal: AbortSignal.timeout(2000),
       });
       return res.ok;
@@ -256,7 +409,7 @@ export class ClientIosExecutor {
   private async ensureAppiumServer(): Promise<void> {
     if (await this.isAppiumRunning()) return;
 
-    const spawnCmd = "npx -y appium --port 4723 --address 127.0.0.1";
+    const spawnCmd = `npx -y appium --port ${this.appiumPort} --address 127.0.0.1`;
     this.appiumProcess = spawn(spawnCmd, {
       shell: true,
       stdio: ["ignore", "pipe", "pipe"],
@@ -271,7 +424,7 @@ export class ClientIosExecutor {
 
     if (!(await this.isAppiumRunning())) {
       throw new Error(
-        "Failed to start local Appium server at http://127.0.0.1:4723 after 30s",
+        `Failed to start local Appium server at http://127.0.0.1:${this.appiumPort} after 30s`,
       );
     }
   }
@@ -371,7 +524,7 @@ export class ClientIosExecutor {
   ): Promise<IosSessionState> {
     const targetApp = this.resolveTargetAppPath(appPath);
     const resolvedBundleId = this.bundleId || extractBundleId(targetApp);
-    const targetDevice = resolveSimulatorDevice(this.deviceName);
+    const targetDevice = resolveSimulatorDevice(this.deviceName, this.simulatorUdid);
 
     const capabilities: any = {
       platformName: "iOS",
@@ -385,9 +538,12 @@ export class ClientIosExecutor {
       "appium:wdaConnectionTimeout": 120000,
       "appium:noReset": true,
       "appium:fullReset": false,
-      "appium:enforceAppInstall": false,
+      "appium:enforceAppInstall": !!this.simulatorUdid,
       "appium:shouldTerminateApp": true,
       "appium:deviceName": targetDevice.name,
+      // Unique WDA ports per executor to prevent conflicts in parallel mode
+      "appium:wdaLocalPort": 8100 + (this.appiumPort - 4723),
+      "appium:mjpegServerPort": 9100 + (this.appiumPort - 4723),
     };
 
     if (targetDevice.udid) {
@@ -404,7 +560,7 @@ export class ClientIosExecutor {
 
     const driver = await remote({
       hostname: "127.0.0.1",
-      port: 4723,
+      port: this.appiumPort,
       logLevel: "silent",
       capabilities,
     });
@@ -653,8 +809,10 @@ export class ClientIosExecutor {
     const targetApp = this.resolveTargetAppPath();
     const bundleId = this.bundleId || extractBundleId(targetApp);
     if (bundleId) {
+      // Terminate on the specific simulator if we have a UDID, otherwise on all booted
+      const target = this.simulatorUdid || "booted";
       try {
-        execSync(`xcrun simctl terminate booted ${bundleId}`, {
+        execSync(`xcrun simctl terminate ${target} ${bundleId}`, {
           stdio: ["ignore", "ignore", "ignore"],
         });
       } catch (_) {}
@@ -680,8 +838,9 @@ export class ClientIosExecutor {
     const targetApp = this.resolveTargetAppPath();
     const bundleId = this.bundleId || extractBundleId(targetApp);
     if (bundleId) {
+      const target = this.simulatorUdid || "booted";
       try {
-        execSync(`xcrun simctl terminate booted ${bundleId}`, {
+        execSync(`xcrun simctl terminate ${target} ${bundleId}`, {
           stdio: ["ignore", "ignore", "ignore"],
         });
       } catch (_) {}
