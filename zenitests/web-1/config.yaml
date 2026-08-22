@@ -1,0 +1,5 @@
+# Web Testing Configuration
+browser: firefox # Options: chromium, chrome, firefox, safari
+localURL: http://localhost:3000
+prodURL: https://www.saucedemo.com
+parallel: 2

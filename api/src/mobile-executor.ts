@@ -22,7 +22,8 @@ const MOBILE_ACT_SCHEMA = {
     action: {
       type: Type.STRING,
       enum: ["click", "type", "scroll", "press", "done"],
-      description: "The gesture or action to perform",
+      description:
+        "The gesture or action to perform. For click/type instructions, always use 'click'/'type' directly with targetElementId; never use 'scroll' for clicking elements.",
     },
     targetElementId: {
       type: Type.STRING,
@@ -202,7 +203,16 @@ export class MobileExecutor {
               const domStr = formatMobileDOM(mobileElements);
               const systemPrompt = `You are Zeni Mobile Executor. Analyze the mobile screen elements and screenshot, then select the best action.
 Valid actions: 'click', 'type', 'scroll', 'press', 'done'.
-Target accessibility ID or name using targetElementId.`;
+
+CRITICAL ACTION RULES:
+1. DIRECT ACTION MATCHING:
+   - If the instruction asks to click, tap, or press a button/element -> action MUST be 'click'.
+   - If the instruction asks to type, enter, or fill text -> action MUST be 'type'.
+2. NO INTERMEDIATE SCROLLING:
+   - DO NOT choose 'scroll' when attempting to click/type an element that exists in the element tree. The mobile runner will target and interact with the element.
+3. EXPLICIT SCROLL ONLY:
+   - ONLY return action 'scroll' when the instruction explicitly requests scrolling (e.g. "Scroll down", "Swipe up") or when the target element is completely absent from the screen tree.
+4. Target accessibility ID or name using targetElementId.`;
 
               const userText = `### Instruction:\n${step.description}\n\n### Current Screen Elements:\n${domStr}`;
               const actParts: any[] = [{ text: `${systemPrompt}\n\n${userText}` }];

@@ -1,6 +1,6 @@
 {
   "name": "zenitest",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "ZeniTest CLI for automated end-to-end testing",
   "author": "ZeniTest",
   "license": "MIT",

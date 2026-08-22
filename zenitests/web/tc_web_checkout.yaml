@@ -1,0 +1,29 @@
+id: tc_web_checkout
+title: Web E-Commerce End-to-End Checkout Flow
+priority: P0
+localURL: http://localhost:3000
+prodURL: http://localhost:3000
+
+variables:
+  customerName: Alex Morgan
+  customerEmail: alex.morgan@example.com
+  shippingAddress: 742 Evergreen Terrace, Springfield
+
+expectedResult: Product added to cart, checkout modal submitted with customer details, and order confirmation is displayed.
+
+steps:
+  - navigate: /
+  - validate: "Sample Store header is displayed"
+  - act: "Click the 'Add to Cart' button on the 'Aura Pro Wireless Headphones' product card"
+  - validate: "Cart button in header displays 'Cart (1)'"
+  - act: "Click on the 'Cart' button in the header"
+  - validate: "Verify 'Your Cart' drawer is displayed with 'Checkout' button"
+  - act: "Click on the 'Checkout' button"
+  - validate: "Verify 'Checkout' modal is displayed with order form"
+  - act: "Type '${customerName}' into the 'Full Name' input field"
+  - act: "Type '${customerEmail}' into the 'Email Address' input field"
+  - act: "Type '${shippingAddress}' into the 'Shipping Address' input field"
+  - act: "Click on the 'Pay & Place Order' button"
+  - validate: "Verify that 'Order Confirmed!' is displayed"
+  - act: "Click on the 'Done' button"
+  - validate: "Verify the modal closes"

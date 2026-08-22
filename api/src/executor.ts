@@ -278,7 +278,8 @@ const ACT_SCHEMA = {
         "nav",
         "done",
       ],
-      description: "The action type to perform",
+      description:
+        "The action type to perform. For instructions asking to click or interact with an element, ALWAYS use 'click' (or 'doubleClick'/'type'/'hover'/'select') directly with the targetElementId; NEVER use 'scroll' for clicking/interacting with elements as the automation engine automatically scrolls elements into view.",
     },
     targetElementId: {
       type: Type.STRING,
@@ -576,9 +577,21 @@ export class Executor {
             } else {
               const domStr = formatDOMState(elements);
 
-              const systemPrompt = `You are Zeni Executor. Analyze the DOM and choose the single best action to fulfill the instruction.
+              const systemPrompt = `You are Zeni Web Executor. Analyze the DOM and choose the single best action to fulfill the instruction.
 Valid actions: 'click', 'doubleClick', 'type', 'press', 'scroll', 'hover', 'select', 'dragAndDrop', 'nav', 'done'.
-If the goal is fully accomplished, set action to 'done'.`;
+
+CRITICAL ACTION RULES:
+1. DIRECT ACTION MATCHING:
+   - If the instruction is to click, tap, press, or interact with a button, link, product card, or element -> the action MUST be 'click' (or 'doubleClick'), NEVER 'scroll'.
+   - If the instruction is to type, enter, or fill in text -> the action MUST be 'type'.
+   - If the instruction is to select from a dropdown -> the action MUST be 'select'.
+   - If the instruction is to hover -> the action MUST be 'hover'.
+2. NO INTERMEDIATE SCROLLING:
+   - DO NOT choose 'scroll' to locate, reveal, or reach an element. The browser automation client automatically scrolls elements into view before clicking/interacting with them.
+   - If the target element exists in the DOM (even if below the fold or not visible in the screenshot), target it directly with action 'click' (or the relevant action) and set its 'targetElementId'.
+3. EXPLICIT SCROLL ONLY:
+   - ONLY return action 'scroll' when the instruction explicitly asks to scroll the page (e.g. "Scroll down", "Scroll to footer", "Scroll up").
+4. If the goal of the instruction is already accomplished, set action to 'done'.`;
 
               const userText = `### Instruction:\n${instruction}\n\n### Current Page DOM State:\n${domStr}`;
 

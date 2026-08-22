@@ -201,6 +201,8 @@ Options:
   --env, -e           Target environment for web tests: prod (default) or local
   --local             Run web tests against localURL
   --prod              Run web tests against prodURL
+  --local-api         Connect to local ZeniTest API server at http://localhost:3001
+  --api-url <url>     Custom API server base URL
   --bundle, -b        Path to built mobile app binary (.ipa, .app, or .apk)
   --device, -d        Target iOS device name or simulator (defaults to config or iPhone 17)
   --browser           Browser for web tests: chromium, chrome, firefox, safari (defaults to config or chromium)
@@ -209,6 +211,21 @@ Options:
   --help, -h          Show this help message
 `);
 }
+
+const BOOLEAN_FLAGS = new Set([
+  "version",
+  "v",
+  "help",
+  "h",
+  "local",
+  "prod",
+  "web",
+  "ios",
+  "android",
+  "local-api",
+  "localApi",
+  "local_api",
+]);
 
 // Simple argument parser
 function parseArgs(args: string[]) {
@@ -220,6 +237,8 @@ function parseArgs(args: string[]) {
       if (cleanKey.includes("=")) {
         const [k, v] = cleanKey.split("=");
         options[k] = v;
+      } else if (BOOLEAN_FLAGS.has(cleanKey)) {
+        options[cleanKey] = true;
       } else {
         const next = args[i + 1];
         if (next && !next.startsWith("-")) {
@@ -249,21 +268,53 @@ function parseArgs(args: string[]) {
   if (options.environment) options.env = options.environment;
   if (options.v) options.version = options.v;
   if (options.h) options.help = options.h;
+  if (options["local-api"] !== undefined) options.localApi = options["local-api"];
+  if (options.local_api !== undefined) options.localApi = options.local_api;
+  if (options["api-url"] !== undefined) options.apiUrl = options["api-url"];
+  if (options.api_url !== undefined) options.apiUrl = options.api_url;
 
   return options;
 }
 
-const API_BASE_URL = process.env.ZENI_API_URL || "https://api.zenitest.ai";
-const WS_BASE_URL =
+let API_BASE_URL = process.env.ZENI_API_URL || "https://api.zenitest.ai";
+let WS_BASE_URL =
   process.env.ZENI_WS_URL ||
   (API_BASE_URL.startsWith("https://")
     ? API_BASE_URL.replace(/^https:\/\//, "wss://")
     : API_BASE_URL.replace(/^http:\/\//, "ws://"));
-const APP_BASE_URL =
+let APP_BASE_URL =
   process.env.ZENI_APP_URL ||
   (API_BASE_URL.includes("localhost")
     ? "http://localhost:3000"
     : "https://app.zenitest.ai");
+
+function configureBaseUrls(options: Record<string, any>) {
+  if (options.localApi) {
+    if (typeof options.localApi === "string" && options.localApi !== "true") {
+      API_BASE_URL = options.localApi.startsWith("http")
+        ? options.localApi
+        : `http://${options.localApi}`;
+    } else {
+      API_BASE_URL = "http://localhost:3001";
+    }
+  } else if (options.apiUrl) {
+    API_BASE_URL = options.apiUrl.startsWith("http")
+      ? options.apiUrl
+      : `http://${options.apiUrl}`;
+  }
+
+  WS_BASE_URL =
+    process.env.ZENI_WS_URL ||
+    (API_BASE_URL.startsWith("https://")
+      ? API_BASE_URL.replace(/^https:\/\//, "wss://")
+      : API_BASE_URL.replace(/^http:\/\//, "ws://"));
+
+  APP_BASE_URL =
+    process.env.ZENI_APP_URL ||
+    (API_BASE_URL.includes("localhost")
+      ? "http://localhost:3000"
+      : "https://app.zenitest.ai");
+}
 
 async function verifyApiKey(
   apiKey: string,
@@ -1951,6 +2002,8 @@ async function main() {
   const args = process.argv.slice(2);
   const options = parseArgs(args);
 
+  configureBaseUrls(options);
+
   if (options.version) {
     console.log(`zenitest-cli v${CURRENT_VERSION}`);
     process.exit(0);
@@ -1961,7 +2014,9 @@ async function main() {
     process.exit(0);
   }
 
-  await checkForLatestVersion();
+  if (!options.localApi) {
+    await checkForLatestVersion();
+  }
 
   const command = options._[0];
 

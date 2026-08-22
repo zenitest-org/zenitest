@@ -666,15 +666,21 @@ export class ClientWebExecutor {
           return list;
         };
 
+        // Clear previously assigned dynamic element IDs to prevent duplicate collisions across DOM updates
+        const existingTagged = (document.body || document.documentElement).querySelectorAll('[data-element-id]');
+        for (let i = 0; i < existingTagged.length; i++) {
+          existingTagged[i].removeAttribute('data-element-id');
+        }
+
         const interactiveNodes = queryAllInteractive(document.body || document.documentElement);
         let idCounter = 1;
 
         return interactiveNodes.map((element) => {
-          let elementId = element.getAttribute('data-element-id') || element.getAttribute('data-testid');
+          let elementId = element.getAttribute('data-testid');
           if (!elementId) {
             elementId = 'el-' + idCounter++;
-            element.setAttribute('data-element-id', elementId);
           }
+          element.setAttribute('data-element-id', elementId);
 
           const tagName = element.tagName.toLowerCase();
           const text = (element.innerText || element.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 100);
@@ -788,13 +794,31 @@ export class ClientWebExecutor {
       case "click":
         if (!locator) throw new Error(`No locator found for target: ${targetElementId}`);
         await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
-        await locator.click({ timeout: 5000 });
+        try {
+          await locator.click({ timeout: 4000 });
+        } catch (clickErr) {
+          try {
+            await locator.click({ timeout: 2000, force: true });
+          } catch {
+            await locator.evaluate((el: HTMLElement) => el.click());
+          }
+        }
         break;
 
       case "doubleClick":
         if (!locator) throw new Error(`No locator found for target: ${targetElementId}`);
         await locator.scrollIntoViewIfNeeded({ timeout: 3000 }).catch(() => {});
-        await locator.dblclick({ timeout: 5000 });
+        try {
+          await locator.dblclick({ timeout: 4000 });
+        } catch (dblErr) {
+          try {
+            await locator.dblclick({ timeout: 2000, force: true });
+          } catch {
+            await locator.evaluate((el: HTMLElement) => {
+              el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }));
+            });
+          }
+        }
         break;
 
       case "type":
