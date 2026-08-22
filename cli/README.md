@@ -90,7 +90,6 @@ Executes YAML test cases.
 | `--browser <browser>` | - | Web test browser: `chromium`, `chrome`, `firefox`, `safari` | `chromium` |
 | `--bundle <path>` | `-b` | Path to mobile app binary file (`.apk` or `.ipa`) | - |
 | `--parallel <count>` | `-p` | Number of test cases to execute concurrently | `5` |
-| `--local-api` | - | Connect to local ZeniTest API server (`http://localhost:3001`) | - |
 | `--api-url <url>` | - | Custom API server base URL | `https://api.zenitest.ai` |
 | `--help` | `-h` | Display CLI help message | - |
 
