@@ -1,8 +1,31 @@
 import { remote } from "webdriverio";
 import { WebSocket } from "ws";
 import { spawn, execSync, ChildProcess } from "child_process";
-import { existsSync } from "fs";
+import { existsSync, mkdirSync, readdirSync } from "fs";
 import { resolve, join } from "path";
+import { tmpdir } from "os";
+
+function findPrebuiltWdaDerivedData(): string | null {
+  try {
+    const defaultDerivedData = join(
+      process.env.HOME || "",
+      "Library/Developer/Xcode/DerivedData",
+    );
+    if (!existsSync(defaultDerivedData)) return null;
+
+    const entries = readdirSync(defaultDerivedData);
+    for (const entry of entries) {
+      if (entry.startsWith("WebDriverAgent-")) {
+        const candidate = join(defaultDerivedData, entry);
+        const productsDir = join(candidate, "Build/Products");
+        if (existsSync(productsDir)) {
+          return candidate;
+        }
+      }
+    }
+  } catch (_) {}
+  return null;
+}
 
 function extractBundleId(appPath: string): string | null {
   try {
@@ -529,16 +552,38 @@ export class ClientIosExecutor {
     const resolvedBundleId = this.bundleId || extractBundleId(targetApp);
     const targetDevice = resolveSimulatorDevice(this.deviceName, this.simulatorUdid);
 
+    const derivedDataSuffix = targetDevice.udid || `${this.appiumPort}`;
+    const derivedDataPath = join(
+      tmpdir(),
+      `zenitest_wda_${derivedDataSuffix}`,
+    );
+
+    const prebuiltWda = findPrebuiltWdaDerivedData();
+    if (prebuiltWda) {
+      const targetBuildDir = join(derivedDataPath, "Build");
+      if (!existsSync(targetBuildDir)) {
+        try {
+          mkdirSync(derivedDataPath, { recursive: true });
+          execSync(`cp -R "${join(prebuiltWda, "Build")}" "${targetBuildDir}"`, {
+            stdio: ["ignore", "ignore", "ignore"],
+          });
+        } catch (_) {}
+      }
+    }
+
     const capabilities: any = {
       platformName: "iOS",
       "appium:automationName": "XCUITest",
       "appium:newCommandTimeout": 300,
-      "appium:usePrebuiltWDA": true,
+      "appium:derivedDataPath": derivedDataPath,
+      ...(prebuiltWda ? { "appium:usePrebuiltWDA": true } : {}),
       "appium:waitForQuiescence": false,
       "appium:simpleIsVisibleCheck": true,
       "appium:useSimpleIsVisibleCheck": true,
       "appium:wdaLaunchTimeout": 120000,
       "appium:wdaConnectionTimeout": 120000,
+      "appium:wdaStartupRetries": 3,
+      "appium:wdaStartupRetryInterval": 5000,
       "appium:noReset": true,
       "appium:fullReset": false,
       "appium:enforceAppInstall": !!this.simulatorUdid,
@@ -716,26 +761,112 @@ export class ClientIosExecutor {
   private async findMobileElement(
     driver: any,
     targetId?: string | number,
+    action?: string,
   ): Promise<any> {
     if (!targetId) return null;
     const str = String(targetId).trim();
+    if (!str) return null;
 
+    // 1. Direct Accessibility ID
     try {
       const byAcc = await driver.$(`~${str}`);
       if (await byAcc.isExisting()) return byAcc;
     } catch (_) {}
 
+    // 2. Exact Predicate String (name, label, value, placeholderValue)
     try {
       const byPred = await driver.$(
-        `-ios predicate string:name == "${str}" || label == "${str}"`,
+        `-ios predicate string:name == "${str}" || label == "${str}" || value == "${str}" || placeholderValue == "${str}"`,
       );
       if (await byPred.isExisting()) return byPred;
     } catch (_) {}
 
+    // 3. Exact XPath
     try {
-      const byXpath = await driver.$(`//*[@name="${str}" or @label="${str}"]`);
+      const byXpath = await driver.$(
+        `//*[@name="${str}" or @label="${str}" or @value="${str}" or @placeholderValue="${str}"]`,
+      );
       if (await byXpath.isExisting()) return byXpath;
     } catch (_) {}
+
+    // 4. Case-insensitive / Contains Predicate
+    try {
+      const byPredContains = await driver.$(
+        `-ios predicate string:name CONTAINS[c] "${str}" || label CONTAINS[c] "${str}" || value CONTAINS[c] "${str}" || placeholderValue CONTAINS[c] "${str}"`,
+      );
+      if (await byPredContains.isExisting()) return byPredContains;
+    } catch (_) {}
+
+    // 5. Generate normalized semantic candidates (e.g. full_name_field -> full_name, Full Name, name)
+    const candidates = new Set<string>();
+    const withoutSuffix = str
+      .replace(/_(field|input|text|txt|btn|button|view)$/i, "")
+      .replace(/(Field|Input|Text|Txt|Btn|Button|View)$/, "");
+    candidates.add(withoutSuffix);
+
+    const asWords = withoutSuffix.replace(/[_-]+/g, " ").trim();
+    candidates.add(asWords);
+
+    const titleCase = asWords.replace(/\b\w/g, (c) => c.toUpperCase());
+    candidates.add(titleCase);
+
+    const words = asWords.split(/\s+/).filter(Boolean);
+    for (const w of words) {
+      if (w.length > 2) candidates.add(w);
+    }
+
+    for (const candidate of candidates) {
+      if (!candidate || candidate === str) continue;
+
+      try {
+        const byAcc = await driver.$(`~${candidate}`);
+        if (await byAcc.isExisting()) return byAcc;
+      } catch (_) {}
+
+      try {
+        const byPred = await driver.$(
+          `-ios predicate string:name CONTAINS[c] "${candidate}" || label CONTAINS[c] "${candidate}" || value CONTAINS[c] "${candidate}" || placeholderValue CONTAINS[c] "${candidate}"`,
+        );
+        if (await byPred.isExisting()) return byPred;
+      } catch (_) {}
+
+      try {
+        const byXpath = await driver.$(
+          `//*[contains(@name, "${candidate}") or contains(@label, "${candidate}") or contains(@value, "${candidate}")]`,
+        );
+        if (await byXpath.isExisting()) return byXpath;
+      } catch (_) {}
+    }
+
+    // 6. If action is type/fill, fallback to visible TextField elements
+    if (action === "type") {
+      try {
+        const textFields = await driver.$$(
+          "XCUIElementTypeTextField, XCUIElementTypeSecureTextField, XCUIElementTypeTextView",
+        );
+        if (textFields && textFields.length > 0) {
+          // If only 1 textfield exists on screen, target it
+          if (textFields.length === 1) {
+            return textFields[0];
+          }
+
+          // Otherwise check if any textfield matches one of the keywords
+          for (const tf of textFields) {
+            const name = (await tf.getAttribute("name").catch(() => "")) || "";
+            const label = (await tf.getAttribute("label").catch(() => "")) || "";
+            const value = (await tf.getAttribute("value").catch(() => "")) || "";
+            const placeholder = (await tf.getAttribute("placeholderValue").catch(() => "")) || "";
+            const combined = `${name} ${label} ${value} ${placeholder}`.toLowerCase();
+
+            for (const candidate of candidates) {
+              if (combined.includes(candidate.toLowerCase())) {
+                return tf;
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
 
     return null;
   }
@@ -751,7 +882,7 @@ export class ClientIosExecutor {
       return { success: true };
     }
 
-    const elem = await this.findMobileElement(driver, targetElementId);
+    const elem = await this.findMobileElement(driver, targetElementId, action);
 
     switch (action) {
       case "click":
@@ -763,7 +894,6 @@ export class ClientIosExecutor {
       case "type":
         if (!elem)
           throw new Error(`Could not find mobile element: ${targetElementId}`);
-        await elem.click().catch(() => {});
         await elem.setValue(text || "");
         break;
 

@@ -80,6 +80,13 @@ export class ExecutorCache {
     ) {
       return;
     }
+    // Never cache failed operations or validations
+    if (result && typeof result === "object") {
+      const res = result as any;
+      if (res.success === false) {
+        return;
+      }
+    }
     try {
       const filePath = join(this.cacheDir, `${key}.json`);
       writeFileSync(
@@ -635,8 +642,6 @@ CRITICAL ACTION RULES:
               stepReport.cacheKey = cacheKey;
               stepReport.cachedResponse = false;
 
-              this.cache.set(cacheKey, actResult);
-
               console.log(
                 `[Executor] Predicted action: ${actResult.action} | Reasoning: ${actResult.reasoning}`,
               );
@@ -654,6 +659,7 @@ CRITICAL ACTION RULES:
                   actRes.error || "Action execution failed on client",
                 );
               }
+              this.cache.set(cacheKey, actResult);
               stepReport.success = true;
             }
           } else if (step.type === "validate") {
@@ -744,6 +750,7 @@ Set pageStillLoading to true if it failed ONLY because the page is still loading
                 });
 
                 const responseText = response.text || "{}";
+
                 const valResult = JSON.parse(
                   responseText.replace(/```json\n?|\n?```/g, "").trim(),
                 ) as StepResult;
@@ -755,10 +762,8 @@ Set pageStillLoading to true if it failed ONLY because the page is still loading
                 stepReport.cacheKey = cacheKey;
                 stepReport.cachedResponse = false;
 
-                this.cache.set(cacheKey, valResult);
-                lastResult = valResult;
-
                 if (valResult.success) {
+                  this.cache.set(cacheKey, valResult);
                   validationPassed = true;
                   break;
                 }

@@ -831,15 +831,19 @@ export class ClientAndroidExecutor {
   private async findMobileElement(
     driver: any,
     targetId?: string | number,
+    action?: string,
   ): Promise<any> {
     if (!targetId) return null;
     const str = String(targetId).trim();
+    if (!str) return null;
 
+    // 1. Accessibility ID / Content Description
     try {
       const byAcc = await driver.$(`~${str}`);
       if (await byAcc.isExisting()) return byAcc;
     } catch (_) {}
 
+    // 2. UiSelector textContains
     try {
       const byText = await driver.$(
         `android=new UiSelector().textContains("${str}")`,
@@ -847,6 +851,7 @@ export class ClientAndroidExecutor {
       if (await byText.isExisting()) return byText;
     } catch (_) {}
 
+    // 3. UiSelector descriptionContains
     try {
       const byDesc = await driver.$(
         `android=new UiSelector().descriptionContains("${str}")`,
@@ -854,6 +859,7 @@ export class ClientAndroidExecutor {
       if (await byDesc.isExisting()) return byDesc;
     } catch (_) {}
 
+    // 4. Resource ID match
     try {
       const byResId = await driver.$(
         `android=new UiSelector().resourceIdMatches(".*${str}.*")`,
@@ -861,12 +867,86 @@ export class ClientAndroidExecutor {
       if (await byResId.isExisting()) return byResId;
     } catch (_) {}
 
+    // 5. XPath match
     try {
       const byXpath = await driver.$(
         `//*[@text="${str}" or @content-desc="${str}" or @resource-id="${str}"]`,
       );
       if (await byXpath.isExisting()) return byXpath;
     } catch (_) {}
+
+    // 6. Normalized candidates (e.g. full_name_field -> full_name, Full Name, name)
+    const candidates = new Set<string>();
+    const withoutSuffix = str
+      .replace(/_(field|input|text|txt|btn|button|view)$/i, "")
+      .replace(/(Field|Input|Text|Txt|Btn|Button|View)$/, "");
+    candidates.add(withoutSuffix);
+
+    const asWords = withoutSuffix.replace(/[_-]+/g, " ").trim();
+    candidates.add(asWords);
+
+    const titleCase = asWords.replace(/\b\w/g, (c) => c.toUpperCase());
+    candidates.add(titleCase);
+
+    const words = asWords.split(/\s+/).filter(Boolean);
+    for (const w of words) {
+      if (w.length > 2) candidates.add(w);
+    }
+
+    for (const candidate of candidates) {
+      if (!candidate || candidate === str) continue;
+
+      try {
+        const byAcc = await driver.$(`~${candidate}`);
+        if (await byAcc.isExisting()) return byAcc;
+      } catch (_) {}
+
+      try {
+        const byText = await driver.$(
+          `android=new UiSelector().textContains("${candidate}")`,
+        );
+        if (await byText.isExisting()) return byText;
+      } catch (_) {}
+
+      try {
+        const byDesc = await driver.$(
+          `android=new UiSelector().descriptionContains("${candidate}")`,
+        );
+        if (await byDesc.isExisting()) return byDesc;
+      } catch (_) {}
+
+      try {
+        const byResId = await driver.$(
+          `android=new UiSelector().resourceIdMatches(".*${candidate}.*")`,
+        );
+        if (await byResId.isExisting()) return byResId;
+      } catch (_) {}
+    }
+
+    // 7. If action is type, fallback to EditText elements
+    if (action === "type") {
+      try {
+        const editTexts = await driver.$$("android.widget.EditText");
+        if (editTexts && editTexts.length > 0) {
+          if (editTexts.length === 1) {
+            return editTexts[0];
+          }
+
+          for (const et of editTexts) {
+            const text = (await et.getText().catch(() => "")) || "";
+            const desc = (await et.getAttribute("content-desc").catch(() => "")) || "";
+            const resId = (await et.getAttribute("resource-id").catch(() => "")) || "";
+            const combined = `${text} ${desc} ${resId}`.toLowerCase();
+
+            for (const candidate of candidates) {
+              if (combined.includes(candidate.toLowerCase())) {
+                return et;
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
 
     return null;
   }
@@ -883,7 +963,7 @@ export class ClientAndroidExecutor {
       return { success: true };
     }
 
-    const elem = await this.findMobileElement(driver, targetElementId);
+    const elem = await this.findMobileElement(driver, targetElementId, action);
 
     switch (action) {
       case "click":
@@ -895,7 +975,6 @@ export class ClientAndroidExecutor {
       case "type":
         if (!elem)
           throw new Error(`Could not find mobile element: ${targetElementId}`);
-        await elem.click().catch(() => {});
         await elem.setValue(text || "");
         break;
 

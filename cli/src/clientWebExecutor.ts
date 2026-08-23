@@ -611,22 +611,38 @@ export class ClientWebExecutor {
           return '/' + parts.join('/');
         };
 
+        const leafElementDenyList = ['svg', 'iframe', 'script', 'style', 'link', 'noscript', 'meta'];
+
         const isElementVisible = (elem) => {
           if (!elem || elem.nodeType !== Node.ELEMENT_NODE) return false;
+          if (typeof elem.checkVisibility === 'function') {
+            const vis = elem.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true });
+            if (!vis) return false;
+          }
           const style = window.getComputedStyle(elem);
           if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') return false;
           const rect = elem.getBoundingClientRect();
           return rect.width > 0 && rect.height > 0;
         };
 
-        const queryAllInteractive = (root, list = []) => {
+        const isLeafElement = (elem) => {
+          const tag = elem.tagName.toLowerCase();
+          if (leafElementDenyList.includes(tag)) return false;
+          const text = elem.textContent ? elem.textContent.trim() : '';
+          if (!text) return false;
+          if (elem.childNodes.length === 0) return true;
+          if (elem.childNodes.length === 1 && elem.childNodes[0].nodeType === Node.TEXT_NODE) return true;
+          return false;
+        };
+
+        const queryDomElements = (root, list = []) => {
           const treeWalker = document.createTreeWalker(
             root,
             NodeFilter.SHOW_ELEMENT,
             {
               acceptNode: (node) => {
                 const tag = node.tagName.toLowerCase();
-                if (['script', 'style', 'noscript', 'meta', 'link', 'svg'].includes(tag)) {
+                if (leafElementDenyList.includes(tag)) {
                   return NodeFilter.FILTER_REJECT;
                 }
                 return NodeFilter.FILTER_ACCEPT;
@@ -637,28 +653,62 @@ export class ClientWebExecutor {
           let current = treeWalker.nextNode();
           while (current) {
             const el = current;
-            const tag = el.tagName.toLowerCase();
-            const role = el.getAttribute('role') || '';
-            const isClickable =
-              ['a', 'button', 'input', 'select', 'textarea'].includes(tag) ||
-              role === 'button' ||
-              role === 'link' ||
-              role === 'menuitem' ||
-              role === 'tab' ||
-              role === 'checkbox' ||
-              role === 'radio' ||
-              role === 'option' ||
-              el.onclick != null ||
-              el.getAttribute('tabindex') != null ||
-              el.getAttribute('contenteditable') === 'true' ||
-              window.getComputedStyle(el).cursor === 'pointer';
+            if (isElementVisible(el)) {
+              const tag = el.tagName.toLowerCase();
+              const role = (el.getAttribute('role') || '').toLowerCase();
+              const isClickable =
+                ['a', 'button', 'input', 'select', 'textarea', 'summary'].includes(tag) ||
+                role === 'button' ||
+                role === 'link' ||
+                role === 'menuitem' ||
+                role === 'tab' ||
+                role === 'checkbox' ||
+                role === 'radio' ||
+                role === 'option' ||
+                role === 'switch' ||
+                role === 'slider' ||
+                role === 'combobox' ||
+                el.onclick != null ||
+                el.getAttribute('tabindex') != null ||
+                el.getAttribute('contenteditable') === 'true' ||
+                window.getComputedStyle(el).cursor === 'pointer';
 
-            if (isClickable && isElementVisible(el)) {
-              list.push(el);
+              const isSemanticContent = [
+                'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+                'p', 'label', 'legend', 'caption', 'figcaption',
+                'blockquote', 'code', 'pre', 'dt', 'dd', 'li', 'td', 'th'
+              ].includes(tag);
+
+              const ariaLabel = el.getAttribute('aria-label') || el.getAttribute('aria-labelledby') || '';
+              const titleAttr = el.getAttribute('title') || '';
+              const altAttr = el.getAttribute('alt') || '';
+
+              let hasDirectText = false;
+              for (let i = 0; i < el.childNodes.length; i++) {
+                const child = el.childNodes[i];
+                if (child.nodeType === Node.TEXT_NODE && child.textContent.trim().length > 0) {
+                  hasDirectText = true;
+                  break;
+                }
+              }
+
+              const innerText = (el.innerText || el.textContent || '').trim();
+
+              const shouldInclude =
+                isClickable ||
+                isSemanticContent ||
+                isLeafElement(el) ||
+                (hasDirectText && innerText.length > 0) ||
+                (ariaLabel.length > 0 || titleAttr.length > 0) ||
+                tag === 'img';
+
+              if (shouldInclude) {
+                list.push({ element: el, isClickable });
+              }
             }
 
             if (el.shadowRoot) {
-              queryAllInteractive(el.shadowRoot, list);
+              queryDomElements(el.shadowRoot, list);
             }
 
             current = treeWalker.nextNode();
@@ -672,10 +722,10 @@ export class ClientWebExecutor {
           existingTagged[i].removeAttribute('data-element-id');
         }
 
-        const interactiveNodes = queryAllInteractive(document.body || document.documentElement);
+        const nodes = queryDomElements(document.body || document.documentElement);
         let idCounter = 1;
 
-        return interactiveNodes.map((element) => {
+        return nodes.map(({ element, isClickable }) => {
           let elementId = element.getAttribute('data-testid');
           if (!elementId) {
             elementId = 'el-' + idCounter++;
@@ -683,10 +733,13 @@ export class ClientWebExecutor {
           element.setAttribute('data-element-id', elementId);
 
           const tagName = element.tagName.toLowerCase();
-          const text = (element.innerText || element.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 100);
+          const rawText = (element.innerText || element.textContent || '').trim().replace(/\\s+/g, ' ');
+          const text = rawText.slice(0, 150);
           const value = (element.value || '').slice(0, 100);
           const placeholder = element.getAttribute('placeholder') || '';
           const ariaLabel = element.getAttribute('aria-label') || element.getAttribute('aria-labelledby') || '';
+          const alt = element.getAttribute('alt') || '';
+          const title = element.getAttribute('title') || '';
           const role = element.getAttribute('role') || '';
           const inputType = element.getAttribute('type') || '';
           const inputName = element.getAttribute('name') || '';
@@ -711,11 +764,13 @@ export class ClientWebExecutor {
           if (inputType) attributes.type = inputType;
           if (inputName) attributes.name = inputName;
           if (href) attributes.href = href;
+          if (alt) attributes.alt = alt;
+          if (title) attributes.title = title;
 
           return {
             id: elementId,
             tagName,
-            text,
+            text: text || alt || title || undefined,
             value,
             placeholder,
             ariaLabel,
@@ -723,7 +778,7 @@ export class ClientWebExecutor {
             selector,
             xpath,
             attributes,
-            isInteractive: true,
+            isInteractive: isClickable,
             href,
             disabled,
             checked,

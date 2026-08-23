@@ -78,6 +78,23 @@ function formatMobileDOM(elements: DOMElement[]): string {
     .join("\n");
 }
 
+function substituteVariables(
+  instruction: string,
+  variables?: Record<string, any>,
+): string {
+  if (!variables || typeof variables !== "object") return instruction;
+  let result = instruction;
+  for (const [key, rawVal] of Object.entries(variables)) {
+    if (rawVal === undefined || rawVal === null) continue;
+    const value = String(rawVal);
+    result = result
+      .replaceAll(`\${${key}}`, value)
+      .replaceAll(`{${key}}`, value)
+      .replaceAll(`%${key}%`, value);
+  }
+  return result;
+}
+
 export class MobileExecutor {
   private ai: GoogleGenAI;
   private session: ClientWebSocketSession;
@@ -144,10 +161,13 @@ export class MobileExecutor {
             }
           }
 
+          const rawDesc = stepDesc || "";
+          const finalDesc = substituteVariables(rawDesc, testCase.variables);
+
           return {
             index: s.index ?? idx + 1,
             type: stepType || "act",
-            description: stepDesc || "",
+            description: finalDesc,
           };
         }
         return s;
@@ -244,8 +264,6 @@ CRITICAL ACTION RULES:
               explanation = actResult.reasoning;
               stepTokens = response.usageMetadata?.totalTokenCount ?? 0;
               totalTokensUsed += stepTokens;
-              this.cache.set(cacheKey, actResult);
-
               console.log(
                 `[MobileExecutor] Action: ${actResult.action} on "${actResult.targetElementId}" | ${actResult.reasoning}`,
               );
@@ -255,7 +273,11 @@ CRITICAL ACTION RULES:
                 actResult,
               });
               stepSuccess = actRes.success;
-              if (!stepSuccess) explanation = actRes.error || "Action failed on mobile device";
+              if (!stepSuccess) {
+                explanation = actRes.error || "Action failed on mobile device";
+              } else {
+                this.cache.set(cacheKey, actResult);
+              }
             }
 
             // Capture post-action screenshot
@@ -323,9 +345,9 @@ Set success to true if assertion passes.`;
 
               stepSuccess = validationResult.success;
               explanation = validationResult.explanation;
-              stepTokens = response.usageMetadata?.totalTokenCount ?? 0;
-              totalTokensUsed += stepTokens;
-              this.cache.set(cacheKey, validationResult);
+              if (validationResult.success) {
+                this.cache.set(cacheKey, validationResult);
+              }
             }
           }
         } catch (err: any) {
