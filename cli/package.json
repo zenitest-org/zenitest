@@ -1,6 +1,6 @@
 {
   "name": "zenitest",
-  "version": "1.0.4",
+  "version": "1.0.6",
   "description": "ZeniTest CLI for automated end-to-end testing",
   "author": "ZeniTest",
   "license": "MIT",
@@ -36,8 +36,7 @@
     "playwright": "^1.51.0",
     "webdriverio": "^8.24.0",
     "ws": "^8.21.1",
-    "yaml": "^2.9.0",
-    "zenitest": "^1.0.3"
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",

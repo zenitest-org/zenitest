@@ -198,7 +198,7 @@ function showHelp() {
 Usage: zenitest <command> [options]
 
 Commands:
-  auth [api_key]       Authenticate CLI with API key (prompts if omitted)
+  auth                 Authenticate CLI with API key (interactive prompt)
   client               Start the local Playwright web executor client
   run                  Read test cases from a folder and run them via the server
   report <run_number>  Fetch execution report summary (e.g. zenitest report 21)
@@ -354,29 +354,34 @@ async function getApiKey(): Promise<string> {
     }
   }
 
+  console.log(
+    `\n\x1b[1;33mPlease authenticate with your Zeni API key to continue.\x1b[0m`,
+  );
+  console.log(
+    `\x1b[1;36mGet your API key at:\x1b[0m \x1b[4;34m${APP_BASE_URL}/settings\x1b[0m\n`,
+  );
+
   while (!apiKey) {
-    console.log(
-      `\x1b[1;33mPlease enter a valid Zeni API key to continue.\x1b[0m`,
-    );
     apiKey = await promptApiKey();
 
     if (!apiKey) {
-      console.error(`\x1b[1;31mError: API key is mandatory.\x1b[0m`);
-      process.exit(1);
+      console.error(`\x1b[1;31mError: API key is mandatory.\x1b[0m\n`);
+      continue;
     }
 
     const verification = await verifyApiKey(apiKey);
     if (verification.valid) {
       saveApiKey(apiKey);
+      console.log(`\x1b[1;32m✓ Successfully authenticated!\x1b[0m`);
       if (verification.user?.name || verification.user?.email) {
         console.log(
-          `\x1b[1;32mAuthenticated as ${verification.user.name || verification.user.email}\x1b[0m`,
+          `\x1b[1;32mAuthenticated as ${verification.user.name || verification.user.email}\x1b[0m\n`,
         );
       }
       return apiKey;
     } else {
       console.error(
-        `\x1b[1;31mError: Invalid API key. Please re-enter a valid API key.\x1b[0m\n`,
+        `\x1b[1;31mError: Invalid API key. Please check your key at ${APP_BASE_URL}/settings and try again.\x1b[0m\n`,
       );
       apiKey = undefined;
     }
@@ -386,15 +391,20 @@ async function getApiKey(): Promise<string> {
 }
 
 async function runAuth(options: Record<string, any>) {
+  console.log(
+    `\n\x1b[1;36mGet your API key at:\x1b[0m \x1b[4;34m${APP_BASE_URL}/settings\x1b[0m\n`,
+  );
+
   let apiKey = options._[1];
 
   if (apiKey) {
     const verification = await verifyApiKey(apiKey);
     if (verification.valid) {
       saveApiKey(apiKey);
+      console.log(`\x1b[1;32m✓ Successfully authenticated!\x1b[0m`);
       if (verification.user?.name || verification.user?.email) {
         console.log(
-          `\x1b[1;32mAuthenticated as ${verification.user.name || verification.user.email}\x1b[0m`,
+          `\x1b[1;32mAuthenticated as ${verification.user.name || verification.user.email}\x1b[0m\n`,
         );
       }
       return;
@@ -408,22 +418,23 @@ async function runAuth(options: Record<string, any>) {
     apiKey = await promptApiKey();
 
     if (!apiKey) {
-      console.error(`\x1b[1;31mError: API key cannot be empty.\x1b[0m`);
-      process.exit(1);
+      console.error(`\x1b[1;31mError: API key cannot be empty.\x1b[0m\n`);
+      continue;
     }
 
     const verification = await verifyApiKey(apiKey);
     if (verification.valid) {
       saveApiKey(apiKey);
+      console.log(`\x1b[1;32m✓ Successfully authenticated!\x1b[0m`);
       if (verification.user?.name || verification.user?.email) {
         console.log(
-          `\x1b[1;32mAuthenticated as ${verification.user.name || verification.user.email}\x1b[0m`,
+          `\x1b[1;32mAuthenticated as ${verification.user.name || verification.user.email}\x1b[0m\n`,
         );
       }
       return;
     } else {
       console.error(
-        `\x1b[1;31mError: Invalid API key. Please re-enter a valid API key.\x1b[0m\n`,
+        `\x1b[1;31mError: Invalid API key. Please check your key at ${APP_BASE_URL}/settings and try again.\x1b[0m\n`,
       );
       apiKey = undefined;
     }
