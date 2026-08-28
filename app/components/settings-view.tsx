@@ -20,6 +20,11 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface PlanLimit {
   max_minutes_web: number;
@@ -374,21 +379,25 @@ export function SettingsView() {
                   </button>
                 </div>
               ) : currentPlan === "pro" && subscriptionStatus === "canceled" ? (
-                <Link
-                  href="/checkout"
-                  className="text-xs font-medium text-foreground hover:underline inline-flex items-center gap-1"
-                >
-                  <span>Reactivate subscription</span>
-                  <ArrowRightIcon className="size-3" />
-                </Link>
+                <Tooltip>
+                  <TooltipTrigger
+                    className="text-xs font-medium text-muted-foreground inline-flex items-center gap-1 cursor-not-allowed opacity-60"
+                  >
+                    <span>Reactivate subscription</span>
+                    <ArrowRightIcon className="size-3" />
+                  </TooltipTrigger>
+                  <TooltipContent>Payment setup in progress</TooltipContent>
+                </Tooltip>
               ) : (
-                <Link
-                  href="/checkout"
-                  className="w-full inline-flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 text-xs font-medium hover:opacity-90 transition-opacity cursor-pointer shadow-xs"
-                >
-                  <span>Upgrade to Pro</span>
-                  <ArrowRightIcon className="size-3.5" />
-                </Link>
+                <Tooltip>
+                  <TooltipTrigger
+                    className="w-full inline-flex items-center justify-center gap-1.5 py-1.5 rounded-lg bg-zinc-900/50 text-white/70 dark:bg-zinc-100/50 dark:text-zinc-900/70 text-xs font-medium cursor-not-allowed shadow-xs"
+                  >
+                    <span>Upgrade to Pro</span>
+                    <ArrowRightIcon className="size-3.5" />
+                  </TooltipTrigger>
+                  <TooltipContent>Payment setup in progress</TooltipContent>
+                </Tooltip>
               )}
             </div>
           </div>
